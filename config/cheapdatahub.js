@@ -1,0 +1,12 @@
+const axios = require('axios');
+require('dotenv').config();
+
+const cheapDataHub = axios.create({
+  baseURL: process.env.CHEAPDATAHUB_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${process.env.CHEAPDATAHUB_API_KEY}`
+  }
+});
+
+module.exports = cheapDataHub;
