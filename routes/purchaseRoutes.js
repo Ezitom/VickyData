@@ -4,11 +4,13 @@ const authMiddleware = require('../middleware/authMiddleware');
 const {
   getAllPlans,
   getPlansByNetwork,
+  getLivePlans,
   purchaseData,
   purchaseAirtime
 } = require('../controllers/purchaseController');
 
 router.get('/plans', authMiddleware, getAllPlans);
+router.get('/plans/live', authMiddleware, getLivePlans);
 router.get('/plans/:network', authMiddleware, getPlansByNetwork);
 router.post('/data', authMiddleware, purchaseData);
 router.post('/airtime', authMiddleware, purchaseAirtime);

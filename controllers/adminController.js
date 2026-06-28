@@ -1,5 +1,5 @@
 const supabase = require('../config/supabase');
-const cheapDataHub = require('../config/cheapdatahub');
+const peyflex = require('../config/peyflex');
 const { sendMail } = require('../config/mailer');
 
 // Helper: format currency
@@ -549,11 +549,11 @@ const updateSettings = async (req, res) => {
 // GET /api/admin/wallet-balance
 const getAdminWalletBalance = async (req, res) => {
   try {
-    const response = await cheapDataHub.get('/wallet/balance/');
+    const response = await peyflex.get('/api/wallet/balance/');
 
     return res.status(200).json({ balance: response.data });
   } catch (error) {
-    console.error('Admin CheapDataHub wallet balance error:', error.response?.data || error.message);
+    console.error('Admin Peyflex wallet balance error:', error.response?.data || error.message);
     return res.status(500).json({ message: 'Failed to fetch provider wallet balance.' });
   }
 };

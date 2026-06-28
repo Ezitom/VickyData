@@ -1,502 +1,477 @@
 const supabase = require('../config/supabase');
-const cheapDataHub = require('../config/cheapdatahub');
+const peyflex = require('../config/peyflex');
 const { sendMail } = require('../config/mailer');
 
-// Helper: format currency
-const formatAmount = (amount) => {
-  return new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN' }).format(amount);
+const generateRef = (prefix) => {
+  const timestamp = Date.now();
+  const random = Math.floor(100000 + Math.random() * 900000);
+  return `${prefix}-${timestamp}-${random}`;
 };
 
-// Helper: validate Nigerian phone number
-const isValidNigerianPhone = (phone) => {
-  return /^(070|080|081|090|091)\d{8}$/.test(phone);
+const formatNaira = (amount) => {
+  return `N${Number(amount).toLocaleString('en-NG', {
+    minimumFractionDigits: 2
+  })}`;
 };
 
-// Helper: check maintenance mode
-const isMaintenanceMode = async () => {
-  const { data } = await supabase
-    .from('site_settings')
-    .select('setting_value')
-    .eq('setting_key', 'maintenance_mode')
-    .single();
-  return data && data.setting_value === 'true';
-};
-
-// Helper: deduct from wallet
-const deductWallet = async (userId, amount) => {
-  const { data: user } = await supabase
-    .from('users')
-    .select('wallet_balance')
-    .eq('id', userId)
-    .single();
-
-  const newBalance = parseFloat(user.wallet_balance) - parseFloat(amount);
-
-  await supabase
-    .from('users')
-    .update({ wallet_balance: newBalance, updated_at: new Date().toISOString() })
-    .eq('id', userId);
-
-  return newBalance;
-};
-
-// Helper: refund wallet
-const refundWallet = async (userId, amount) => {
-  const { data: user } = await supabase
-    .from('users')
-    .select('wallet_balance')
-    .eq('id', userId)
-    .single();
-
-  const newBalance = parseFloat(user.wallet_balance) + parseFloat(amount);
-
-  await supabase
-    .from('users')
-    .update({ wallet_balance: newBalance, updated_at: new Date().toISOString() })
-    .eq('id', userId);
-
-  return newBalance;
-};
-
-// GET /api/purchase/plans
-const getAllPlans = async (req, res) => {
+// ─── GET ALL PLANS ────────────────────────────────────────────
+exports.getAllPlans = async (req, res) => {
   try {
     const { data: plans, error } = await supabase
       .from('data_plans')
       .select('*')
       .eq('is_active', true)
-      .order('network')
-      .order('selling_price');
+      .order('selling_price', { ascending: true });
 
-    if (error) {
-      console.error('Get all plans error:', error);
-      return res.status(500).json({ message: 'Something went wrong. Please try again.' });
-    }
+    if (error) throw error;
 
-    // Group by network
-    const grouped = {};
-    plans.forEach((plan) => {
-      if (!grouped[plan.network]) grouped[plan.network] = [];
-      grouped[plan.network].push(plan);
-    });
+    const grouped = plans.reduce((acc, plan) => {
+      if (!acc[plan.network]) acc[plan.network] = [];
+      acc[plan.network].push(plan);
+      return acc;
+    }, {});
 
-    return res.status(200).json({ plans: grouped });
+    res.json({ plans: grouped });
   } catch (error) {
-    console.error('Get all plans error:', error);
-    return res.status(500).json({ message: 'Something went wrong. Please try again.' });
+    console.error('Get plans error:', error);
+    res.status(500).json({ message: 'Something went wrong.' });
   }
 };
 
-// GET /api/purchase/plans/:network
-const getPlansByNetwork = async (req, res) => {
+// ─── GET PLANS BY NETWORK ─────────────────────────────────────
+exports.getPlansByNetwork = async (req, res) => {
   try {
     const { network } = req.params;
 
-    const validNetworks = ['MTN', 'Airtel', 'Glo', '9mobile'];
-    if (!validNetworks.includes(network)) {
-      return res.status(400).json({ message: 'Invalid network. Must be MTN, Airtel, Glo, or 9mobile.' });
-    }
-
     const { data: plans, error } = await supabase
       .from('data_plans')
       .select('*')
-      .eq('is_active', true)
       .eq('network', network)
-      .order('selling_price');
+      .eq('is_active', true)
+      .order('selling_price', { ascending: true });
 
-    if (error) {
-      console.error('Get plans by network error:', error);
-      return res.status(500).json({ message: 'Something went wrong. Please try again.' });
-    }
+    if (error) throw error;
 
-    return res.status(200).json({ plans });
+    res.json({ plans });
   } catch (error) {
     console.error('Get plans by network error:', error);
-    return res.status(500).json({ message: 'Something went wrong. Please try again.' });
+    res.status(500).json({ message: 'Something went wrong.' });
   }
 };
 
-// POST /api/purchase/data
-const purchaseData = async (req, res) => {
+// ─── GET LIVE PLANS FROM PEYFLEX ──────────────────────────────
+exports.getLivePlans = async (req, res) => {
+  try {
+    const { network } = req.query;
+
+    if (!network) {
+      return res.status(400).json({
+        message: 'Network is required. e.g mtn_gifting_data'
+      });
+    }
+
+    const response = await peyflex.get(
+      `/api/data/plans/?network=${network}`
+    );
+
+    res.json({ plans: response.data.plans });
+  } catch (error) {
+    console.error('Get live plans error:', error);
+    res.status(500).json({ message: 'Could not fetch plans.' });
+  }
+};
+
+// ─── PURCHASE DATA ────────────────────────────────────────────
+exports.purchaseData = async (req, res) => {
   try {
     const { plan_id, phone_number } = req.body;
 
+    // Validate inputs
     if (!plan_id || !phone_number) {
-      return res.status(400).json({ message: 'plan_id and phone_number are required.' });
+      return res.status(400).json({
+        message: 'Plan and phone number are required.'
+      });
     }
 
-    if (!isValidNigerianPhone(phone_number)) {
-      return res.status(400).json({ message: 'Invalid phone number. Must be 11 digits starting with 070, 080, 081, 090, or 091.' });
+    // Validate Nigerian phone number
+    const phoneRegex = /^(070|080|081|090|091)\d{8}$/;
+    if (!phoneRegex.test(phone_number)) {
+      return res.status(400).json({
+        message: 'Enter a valid 11-digit Nigerian phone number.'
+      });
     }
 
-    // Fetch plan
+    // Check maintenance mode
+    const { data: maintenance } = await supabase
+      .from('site_settings')
+      .select('setting_value')
+      .eq('setting_key', 'maintenance_mode')
+      .single();
+
+    if (maintenance?.setting_value === 'true') {
+      return res.status(503).json({
+        message: 'Platform is under maintenance. Try again later.'
+      });
+    }
+
+    // Fetch the plan from Supabase
     const { data: plan, error: planError } = await supabase
       .from('data_plans')
       .select('*')
       .eq('id', plan_id)
+      .eq('is_active', true)
       .single();
 
     if (planError || !plan) {
-      return res.status(404).json({ message: 'Data plan not found.' });
+      return res.status(404).json({ message: 'Plan not found.' });
     }
 
-    if (!plan.is_active) {
-      return res.status(404).json({ message: 'This data plan is currently unavailable.' });
-    }
-
-    // Check wallet balance
-    const { data: userRecord } = await supabase
+    // Fetch user wallet balance
+    const { data: user, error: userError } = await supabase
       .from('users')
       .select('wallet_balance, full_name, email')
       .eq('id', req.user.id)
       .single();
 
-    if (parseFloat(userRecord.wallet_balance) < parseFloat(plan.selling_price)) {
-      return res.status(400).json({ message: 'Insufficient wallet balance. Please fund your wallet.' });
+    if (userError || !user) {
+      return res.status(404).json({ message: 'User not found.' });
     }
 
-    // Check maintenance mode
-    if (await isMaintenanceMode()) {
-      return res.status(503).json({ message: 'Service is currently under maintenance. Please try again later.' });
+    // Check balance
+    if (parseFloat(user.wallet_balance) < parseFloat(plan.selling_price)) {
+      return res.status(400).json({
+        message: 'Insufficient wallet balance. Please fund your wallet.'
+      });
     }
 
     // Generate reference
-    const reference = `VD-DATA-${Date.now()}-${Math.floor(100000 + Math.random() * 900000)}`;
+    const reference = generateRef('VD-DATA');
 
     // Insert pending transaction
-    const { data: transaction } = await supabase
-      .from('transactions')
-      .insert({
-        user_id: req.user.id,
-        type: 'data',
-        network: plan.network,
-        phone_number,
-        amount: plan.selling_price,
-        plan_id,
-        reference,
-        status: 'pending'
+    await supabase.from('transactions').insert({
+      user_id: req.user.id,
+      type: 'data',
+      network: plan.network,
+      phone_number,
+      amount: plan.selling_price,
+      plan_id: plan.id,
+      reference,
+      status: 'pending'
+    });
+
+    // Deduct wallet BEFORE calling Peyflex
+    await supabase
+      .from('users')
+      .update({
+        wallet_balance: parseFloat(user.wallet_balance) -
+          parseFloat(plan.selling_price)
       })
-      .select()
-      .single();
+      .eq('id', req.user.id);
 
-    // Deduct wallet BEFORE calling provider
-    const newBalance = await deductWallet(req.user.id, plan.selling_price);
-
-    // Call CheapDataHub API
-    let providerSuccess = false;
-    let providerReference = null;
-
-    try {
-      const providerRes = await cheapDataHub.post('/data/purchase/', {
-        bundle_id: plan.bundle_id,
-        phone_number
-      });
-
-      if (providerRes.data && providerRes.data.status === true) {
-        providerSuccess = true;
-        providerReference = providerRes.data.reference || providerRes.data.order_id || null;
+    // ── CALL PEYFLEX DATA API ───────────────────────────────
+    const providerResponse = await peyflex.post(
+      '/api/data/purchase/',
+      {
+        network: plan.peyflex_network_id,
+        mobile_number: phone_number,
+        plan_code: plan.plan_code
       }
-    } catch (providerError) {
-      console.error('CheapDataHub data error:', providerError.response?.data || providerError.message);
-      providerSuccess = false;
-    }
+    );
+    // ────────────────────────────────────────────────────────
 
-    if (providerSuccess) {
-      // Update transaction to successful
+    if (providerResponse.data.status === true ||
+        providerResponse.data.status === 'success' ||
+        providerResponse.data.status === 'successful') {
+
       await supabase
         .from('transactions')
-        .update({ status: 'successful', provider_reference: providerReference })
-        .eq('id', transaction.id);
+        .update({
+          status: 'successful',
+          provider_reference: providerResponse.data.reference || null
+        })
+        .eq('reference', reference);
 
-      // Send success email
-      const firstName = userRecord.full_name.split(' ')[0];
-      const successHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="UTF-8">
-            <style>
-              body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }
-              .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-              .header { background: linear-gradient(135deg, #6c3de0, #a855f7); padding: 30px; text-align: center; }
-              .header h1 { color: #fff; margin: 0; font-size: 28px; letter-spacing: 2px; }
-              .body { padding: 30px; }
-              .body h2 { color: #22c55e; }
-              .body p { color: #555; line-height: 1.7; }
-              .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
-              .footer { background: #f9f9f9; padding: 20px; text-align: center; font-size: 12px; color: #999; }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <div class="header"><h1>VICKYDATA</h1></div>
-              <div class="body">
-                <h2>Data Purchase Successful! ✅</h2>
-                <p>Hi ${firstName}, your data purchase was successful.</p>
-                <div class="detail-row"><span><strong>Plan:</strong></span><span>${plan.plan_name}</span></div>
-                <div class="detail-row"><span><strong>Network:</strong></span><span>${plan.network}</span></div>
-                <div class="detail-row"><span><strong>Size:</strong></span><span>${plan.size}</span></div>
-                <div class="detail-row"><span><strong>Validity:</strong></span><span>${plan.validity}</span></div>
-                <div class="detail-row"><span><strong>Phone:</strong></span><span>${phone_number}</span></div>
-                <div class="detail-row"><span><strong>Amount Deducted:</strong></span><span>${formatAmount(plan.selling_price)}</span></div>
-                <div class="detail-row"><span><strong>New Balance:</strong></span><span>${formatAmount(newBalance)}</span></div>
-                <div class="detail-row"><span><strong>Reference:</strong></span><span>${reference}</span></div>
-              </div>
-              <div class="footer">&copy; ${new Date().getFullYear()} VICKYDATA. All rights reserved.</div>
-            </div>
-          </body>
-        </html>
-      `;
-      sendMail(userRecord.email, 'Data Purchase Successful', successHtml);
+      const newBalance = parseFloat(user.wallet_balance) -
+        parseFloat(plan.selling_price);
 
-      return res.status(200).json({
+      await sendMail(
+        user.email,
+        'Data Purchase Successful - VICKYDATA',
+        `
+        <h2>Data Purchase Successful</h2>
+        <p>Hi ${user.full_name},</p>
+        <p>Your data purchase was successful. Details:</p>
+        <ul>
+          <li><strong>Plan:</strong> ${plan.plan_name}</li>
+          <li><strong>Network:</strong> ${plan.network}</li>
+          <li><strong>Phone:</strong> ${phone_number}</li>
+          <li><strong>Amount Deducted:</strong>
+            ${formatNaira(plan.selling_price)}</li>
+          <li><strong>New Balance:</strong>
+            ${formatNaira(newBalance)}</li>
+          <li><strong>Reference:</strong> ${reference}</li>
+        </ul>
+        <p>Thank you for using VICKYDATA.</p>
+        `
+      );
+
+      return res.json({
         message: 'Data purchased successfully.',
         reference,
         new_balance: newBalance
       });
+
     } else {
-      // Update transaction to failed
+      throw new Error('Provider returned failure status');
+    }
+
+  } catch (error) {
+    console.error('Data purchase error:', error);
+
+    // Refund wallet on failure
+    try {
+      const { data: currentUser } = await supabase
+        .from('users')
+        .select('wallet_balance, full_name, email')
+        .eq('id', req.user.id)
+        .single();
+
+      const { data: plan } = await supabase
+        .from('data_plans')
+        .select('selling_price')
+        .eq('id', req.body.plan_id)
+        .single();
+
+      if (currentUser && plan) {
+        await supabase
+          .from('users')
+          .update({
+            wallet_balance: parseFloat(currentUser.wallet_balance) +
+              parseFloat(plan.selling_price)
+          })
+          .eq('id', req.user.id);
+      }
+
       await supabase
         .from('transactions')
         .update({ status: 'failed' })
-        .eq('id', transaction.id);
+        .eq('user_id', req.user.id)
+        .eq('status', 'pending');
 
-      // Refund wallet
-      const refundedBalance = await refundWallet(req.user.id, plan.selling_price);
-
-      // Send failure email
-      const firstName = userRecord.full_name.split(' ')[0];
-      const failHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="UTF-8">
-            <style>
-              body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }
-              .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-              .header { background: linear-gradient(135deg, #6c3de0, #a855f7); padding: 30px; text-align: center; }
-              .header h1 { color: #fff; margin: 0; font-size: 28px; letter-spacing: 2px; }
-              .body { padding: 30px; }
-              .body h2 { color: #ef4444; }
-              .body p { color: #555; line-height: 1.7; }
-              .footer { background: #f9f9f9; padding: 20px; text-align: center; font-size: 12px; color: #999; }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <div class="header"><h1>VICKYDATA</h1></div>
-              <div class="body">
-                <h2>Data Purchase Failed ❌</h2>
-                <p>Hi ${firstName},</p>
-                <p>Your data purchase for <strong>${phone_number}</strong> (${plan.plan_name} - ${plan.network}) failed.</p>
-                <p><strong>${formatAmount(plan.selling_price)}</strong> has been refunded to your wallet.</p>
-                <p><strong>New Wallet Balance:</strong> ${formatAmount(refundedBalance)}</p>
-                <p><strong>Reference:</strong> ${reference}</p>
-                <p>Please try again. If the issue persists, contact our support team.</p>
-              </div>
-              <div class="footer">&copy; ${new Date().getFullYear()} VICKYDATA. All rights reserved.</div>
-            </div>
-          </body>
-        </html>
-      `;
-      sendMail(userRecord.email, 'Data Purchase Failed', failHtml);
-
-      return res.status(500).json({ message: 'Data purchase failed. Wallet refunded.' });
+      if (currentUser) {
+        await sendMail(
+          currentUser.email,
+          'Data Purchase Failed - VICKYDATA',
+          `
+          <h2>Data Purchase Failed</h2>
+          <p>Hi ${currentUser.full_name},</p>
+          <p>Your data purchase could not be completed.
+             Your wallet has been refunded.</p>
+          <p>Reference: ${req.body.reference || 'N/A'}</p>
+          `
+        );
+      }
+    } catch (refundError) {
+      console.error('Refund error:', refundError);
     }
-  } catch (error) {
-    console.error('Purchase data error:', error);
-    return res.status(500).json({ message: 'Something went wrong. Please try again.' });
+
+    res.status(500).json({
+      message: 'Data purchase failed. Your wallet has been refunded.'
+    });
   }
 };
 
-// POST /api/purchase/airtime
-const purchaseAirtime = async (req, res) => {
+// ─── PURCHASE AIRTIME ─────────────────────────────────────────
+exports.purchaseAirtime = async (req, res) => {
   try {
-    const { provider_id, phone_number, amount } = req.body;
+    const { network, phone_number, amount } = req.body;
 
-    if (!provider_id || !phone_number || !amount) {
-      return res.status(400).json({ message: 'provider_id, phone_number, and amount are required.' });
+    // Validate inputs
+    if (!network || !phone_number || !amount) {
+      return res.status(400).json({
+        message: 'Network, phone number and amount are required.'
+      });
     }
 
-    const parsedAmount = parseFloat(amount);
-    if (isNaN(parsedAmount) || parsedAmount < 50) {
-      return res.status(400).json({ message: 'Minimum airtime amount is NGN 50.' });
-    }
-    if (parsedAmount > 50000) {
-      return res.status(400).json({ message: 'Maximum airtime amount is NGN 50,000.' });
-    }
-
-    if (!isValidNigerianPhone(phone_number)) {
-      return res.status(400).json({ message: 'Invalid phone number. Must be 11 digits starting with 070, 080, 081, 090, or 091.' });
+    // Validate amount
+    if (parseFloat(amount) < 50 || parseFloat(amount) > 50000) {
+      return res.status(400).json({
+        message: 'Amount must be between N50 and N50,000.'
+      });
     }
 
-    // Map provider_id to network name
-    const networkMap = { 1: 'MTN', 2: 'Airtel', 3: 'Glo', 4: '9mobile' };
-    const network = networkMap[parseInt(provider_id)];
-    if (!network) {
-      return res.status(400).json({ message: 'Invalid provider_id. Use 1=MTN, 2=Airtel, 3=Glo, 4=9mobile.' });
+    // Validate Nigerian phone number
+    const phoneRegex = /^(070|080|081|090|091)\d{8}$/;
+    if (!phoneRegex.test(phone_number)) {
+      return res.status(400).json({
+        message: 'Enter a valid 11-digit Nigerian phone number.'
+      });
     }
 
-    // Check wallet balance
-    const { data: userRecord } = await supabase
+    // Check maintenance mode
+    const { data: maintenance } = await supabase
+      .from('site_settings')
+      .select('setting_value')
+      .eq('setting_key', 'maintenance_mode')
+      .single();
+
+    if (maintenance?.setting_value === 'true') {
+      return res.status(503).json({
+        message: 'Platform is under maintenance. Try again later.'
+      });
+    }
+
+    // Fetch user wallet balance
+    const { data: user, error: userError } = await supabase
       .from('users')
       .select('wallet_balance, full_name, email')
       .eq('id', req.user.id)
       .single();
 
-    if (parseFloat(userRecord.wallet_balance) < parsedAmount) {
-      return res.status(400).json({ message: 'Insufficient wallet balance. Please fund your wallet.' });
+    if (userError || !user) {
+      return res.status(404).json({ message: 'User not found.' });
     }
 
-    // Check maintenance mode
-    if (await isMaintenanceMode()) {
-      return res.status(503).json({ message: 'Service is currently under maintenance. Please try again later.' });
+    // Check balance
+    if (parseFloat(user.wallet_balance) < parseFloat(amount)) {
+      return res.status(400).json({
+        message: 'Insufficient wallet balance. Please fund your wallet.'
+      });
     }
 
     // Generate reference
-    const reference = `VD-AIR-${Date.now()}-${Math.floor(100000 + Math.random() * 900000)}`;
+    const reference = generateRef('VD-AIR');
+
+    // Network name map
+    const networkNames = {
+      mtn: 'MTN',
+      airtel: 'Airtel',
+      glo: 'Glo',
+      '9mobile': '9mobile'
+    };
 
     // Insert pending transaction
-    const { data: transaction } = await supabase
-      .from('transactions')
-      .insert({
-        user_id: req.user.id,
-        type: 'airtime',
-        network,
-        phone_number,
-        amount: parsedAmount,
-        reference,
-        status: 'pending'
+    await supabase.from('transactions').insert({
+      user_id: req.user.id,
+      type: 'airtime',
+      network: networkNames[network] || network,
+      phone_number,
+      amount: parseFloat(amount),
+      reference,
+      status: 'pending'
+    });
+
+    // Deduct wallet BEFORE calling Peyflex
+    await supabase
+      .from('users')
+      .update({
+        wallet_balance: parseFloat(user.wallet_balance) -
+          parseFloat(amount)
       })
-      .select()
-      .single();
+      .eq('id', req.user.id);
 
-    // Deduct wallet BEFORE calling provider
-    const newBalance = await deductWallet(req.user.id, parsedAmount);
-
-    // Call CheapDataHub API
-    let providerSuccess = false;
-    let providerReference = null;
-
-    try {
-      const providerRes = await cheapDataHub.post('/airtime/purchase/', {
-        provider_id: parseInt(provider_id),
-        phone_number,
-        amount: parsedAmount
-      });
-
-      if (providerRes.data && providerRes.data.status === true) {
-        providerSuccess = true;
-        providerReference = providerRes.data.reference || providerRes.data.order_id || null;
+    // ── CALL PEYFLEX AIRTIME API ────────────────────────────
+    const providerResponse = await peyflex.post(
+      '/api/airtime/purchase/',
+      {
+        network,
+        mobile_number: phone_number,
+        amount: parseFloat(amount)
       }
-    } catch (providerError) {
-      console.error('CheapDataHub airtime error:', providerError.response?.data || providerError.message);
-      providerSuccess = false;
-    }
+    );
+    // ────────────────────────────────────────────────────────
 
-    const firstName = userRecord.full_name.split(' ')[0];
+    if (providerResponse.data.status === true ||
+        providerResponse.data.status === 'success' ||
+        providerResponse.data.status === 'successful') {
 
-    if (providerSuccess) {
-      // Update transaction to successful
       await supabase
         .from('transactions')
-        .update({ status: 'successful', provider_reference: providerReference })
-        .eq('id', transaction.id);
+        .update({
+          status: 'successful',
+          provider_reference:
+            providerResponse.data.reference ||
+            String(providerResponse.data.transaction_id) ||
+            null
+        })
+        .eq('reference', reference);
 
-      // Send success email
-      const successHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="UTF-8">
-            <style>
-              body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }
-              .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-              .header { background: linear-gradient(135deg, #6c3de0, #a855f7); padding: 30px; text-align: center; }
-              .header h1 { color: #fff; margin: 0; font-size: 28px; letter-spacing: 2px; }
-              .body { padding: 30px; }
-              .body h2 { color: #22c55e; }
-              .body p { color: #555; line-height: 1.7; }
-              .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
-              .footer { background: #f9f9f9; padding: 20px; text-align: center; font-size: 12px; color: #999; }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <div class="header"><h1>VICKYDATA</h1></div>
-              <div class="body">
-                <h2>Airtime Sent Successfully! ✅</h2>
-                <p>Hi ${firstName}, your airtime purchase was successful.</p>
-                <div class="detail-row"><span><strong>Network:</strong></span><span>${network}</span></div>
-                <div class="detail-row"><span><strong>Phone:</strong></span><span>${phone_number}</span></div>
-                <div class="detail-row"><span><strong>Amount:</strong></span><span>${formatAmount(parsedAmount)}</span></div>
-                <div class="detail-row"><span><strong>New Balance:</strong></span><span>${formatAmount(newBalance)}</span></div>
-                <div class="detail-row"><span><strong>Reference:</strong></span><span>${reference}</span></div>
-              </div>
-              <div class="footer">&copy; ${new Date().getFullYear()} VICKYDATA. All rights reserved.</div>
-            </div>
-          </body>
-        </html>
-      `;
-      sendMail(userRecord.email, 'Airtime Sent Successfully', successHtml);
+      const newBalance = parseFloat(user.wallet_balance) -
+        parseFloat(amount);
 
-      return res.status(200).json({
+      await sendMail(
+        user.email,
+        'Airtime Purchase Successful - VICKYDATA',
+        `
+        <h2>Airtime Purchase Successful</h2>
+        <p>Hi ${user.full_name},</p>
+        <p>Your airtime purchase was successful. Details:</p>
+        <ul>
+          <li><strong>Network:</strong>
+            ${networkNames[network] || network}</li>
+          <li><strong>Phone:</strong> ${phone_number}</li>
+          <li><strong>Amount:</strong> ${formatNaira(amount)}</li>
+          <li><strong>New Balance:</strong>
+            ${formatNaira(newBalance)}</li>
+          <li><strong>Reference:</strong> ${reference}</li>
+        </ul>
+        <p>Thank you for using VICKYDATA.</p>
+        `
+      );
+
+      return res.json({
         message: 'Airtime sent successfully.',
         reference,
         new_balance: newBalance
       });
+
     } else {
-      // Update transaction to failed
-      await supabase
-        .from('transactions')
-        .update({ status: 'failed' })
-        .eq('id', transaction.id);
-
-      // Refund wallet
-      const refundedBalance = await refundWallet(req.user.id, parsedAmount);
-
-      // Send failure email
-      const failHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="UTF-8">
-            <style>
-              body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }
-              .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-              .header { background: linear-gradient(135deg, #6c3de0, #a855f7); padding: 30px; text-align: center; }
-              .header h1 { color: #fff; margin: 0; font-size: 28px; letter-spacing: 2px; }
-              .body { padding: 30px; }
-              .body h2 { color: #ef4444; }
-              .body p { color: #555; line-height: 1.7; }
-              .footer { background: #f9f9f9; padding: 20px; text-align: center; font-size: 12px; color: #999; }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <div class="header"><h1>VICKYDATA</h1></div>
-              <div class="body">
-                <h2>Airtime Purchase Failed ❌</h2>
-                <p>Hi ${firstName},</p>
-                <p>Your airtime purchase of <strong>${formatAmount(parsedAmount)}</strong> for <strong>${phone_number}</strong> (${network}) failed.</p>
-                <p><strong>${formatAmount(parsedAmount)}</strong> has been refunded to your wallet.</p>
-                <p><strong>New Wallet Balance:</strong> ${formatAmount(refundedBalance)}</p>
-                <p><strong>Reference:</strong> ${reference}</p>
-                <p>Please try again. If the issue persists, contact our support team.</p>
-              </div>
-              <div class="footer">&copy; ${new Date().getFullYear()} VICKYDATA. All rights reserved.</div>
-            </div>
-          </body>
-        </html>
-      `;
-      sendMail(userRecord.email, 'Airtime Purchase Failed', failHtml);
-
-      return res.status(500).json({ message: 'Airtime purchase failed. Wallet refunded.' });
+      throw new Error('Provider returned failure status');
     }
+
   } catch (error) {
-    console.error('Purchase airtime error:', error);
-    return res.status(500).json({ message: 'Something went wrong. Please try again.' });
+    console.error('Airtime purchase error:', error);
+
+    // Refund wallet on failure
+    try {
+      const { data: currentUser } = await supabase
+        .from('users')
+        .select('wallet_balance, full_name, email')
+        .eq('id', req.user.id)
+        .single();
+
+      if (currentUser) {
+        await supabase
+          .from('users')
+          .update({
+            wallet_balance: parseFloat(currentUser.wallet_balance) +
+              parseFloat(req.body.amount)
+          })
+          .eq('id', req.user.id);
+
+        await supabase
+          .from('transactions')
+          .update({ status: 'failed' })
+          .eq('user_id', req.user.id)
+          .eq('status', 'pending');
+
+        await sendMail(
+          currentUser.email,
+          'Airtime Purchase Failed - VICKYDATA',
+          `
+          <h2>Airtime Purchase Failed</h2>
+          <p>Hi ${currentUser.full_name},</p>
+          <p>Your airtime purchase could not be completed.
+             Your wallet has been refunded.</p>
+          `
+        );
+      }
+    } catch (refundError) {
+      console.error('Refund error:', refundError);
+    }
+
+    res.status(500).json({
+      message: 'Airtime purchase failed. Your wallet has been refunded.'
+    });
   }
 };
-
-module.exports = { getAllPlans, getPlansByNetwork, purchaseData, purchaseAirtime };
