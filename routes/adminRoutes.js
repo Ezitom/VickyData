@@ -37,6 +37,7 @@ router.patch('/wallet-funding/:id/approve', approveFunding);
 router.patch('/wallet-funding/:id/reject', rejectFunding);
 router.get('/settings', getSettings);
 router.patch('/settings', updateSettings);
+router.put('/settings', updateSettings);
 router.get('/wallet-balance', getAdminWalletBalance);
 
 module.exports = router;
