@@ -372,9 +372,9 @@ exports.purchaseAirtime = async (req, res) => {
 
     // ── CALL PEYFLEX AIRTIME API ────────────────────────────
     const providerResponse = await peyflex.post(
-      '/api/airtime/purchase/',
+      '/api/airtime/topup/',
       {
-        network,
+        network: network,
         mobile_number: phone_number,
         amount: parseFloat(amount)
       }

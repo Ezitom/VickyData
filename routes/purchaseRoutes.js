@@ -10,7 +10,7 @@ const {
 } = require('../controllers/purchaseController');
 
 router.get('/plans', authMiddleware, getAllPlans);
-router.get('/plans/live', authMiddleware, getLivePlans);
+router.get('/live-plans', authMiddleware, getLivePlans);
 router.get('/plans/:network', authMiddleware, getPlansByNetwork);
 router.post('/data', authMiddleware, purchaseData);
 router.post('/airtime', authMiddleware, purchaseAirtime);

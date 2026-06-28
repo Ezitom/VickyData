@@ -27,6 +27,8 @@ CREATE TABLE data_plans (
   bundle_id INTEGER NOT NULL,
   cost_price DECIMAL(10,2) NOT NULL,
   selling_price DECIMAL(10,2) NOT NULL,
+  peyflex_network_id VARCHAR(50),
+  plan_code VARCHAR(50),
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -91,24 +93,24 @@ VALUES (
 -- 8. SEED DATA PLANS
 -- NOTE: Replace bundle_id values with real IDs from your CheapDataHub dashboard!
 INSERT INTO data_plans
-  (network, plan_name, size, validity, bundle_id, cost_price, selling_price)
+  (network, plan_name, size, validity, bundle_id, cost_price, selling_price, peyflex_network_id, plan_code)
 VALUES
-  ('MTN', '1GB Daily', '1GB', '1 Day', 101, 280.00, 350.00),
-  ('MTN', '2GB Weekly', '2GB', '7 Days', 102, 560.00, 700.00),
-  ('MTN', '5GB Monthly', '5GB', '30 Days', 103, 1200.00, 1500.00),
-  ('MTN', '10GB Monthly', '10GB', '30 Days', 104, 2200.00, 2800.00),
-  ('Airtel', '1GB Daily', '1GB', '1 Day', 201, 240.00, 300.00),
-  ('Airtel', '2GB Weekly', '2GB', '7 Days', 202, 520.00, 650.00),
-  ('Airtel', '5GB Monthly', '5GB', '30 Days', 203, 1100.00, 1400.00),
-  ('Airtel', '10GB Monthly', '10GB', '30 Days', 204, 2160.00, 2700.00),
-  ('Glo', '1.5GB Daily', '1.5GB', '1 Day', 301, 240.00, 300.00),
-  ('Glo', '3GB Weekly', '3GB', '7 Days', 302, 560.00, 700.00),
-  ('Glo', '7.5GB Monthly', '7.5GB', '30 Days', 303, 1200.00, 1500.00),
-  ('Glo', '15GB Monthly', '15GB', '30 Days', 304, 2200.00, 2800.00),
-  ('9mobile', '1GB Weekly', '1GB', '7 Days', 401, 320.00, 400.00),
-  ('9mobile', '2.5GB Monthly', '2.5GB', '30 Days', 402, 800.00, 1000.00),
-  ('9mobile', '5GB Monthly', '5GB', '30 Days', 403, 1200.00, 1500.00),
-  ('9mobile', '11.5GB Monthly', '11.5GB', '30 Days', 404, 2400.00, 3000.00);
+  ('MTN', '1GB Daily', '1GB', '1 Day', 101, 280.00, 350.00, 'mtn_gifting_data', 'M1GBS'),
+  ('MTN', '2GB Weekly', '2GB', '7 Days', 102, 560.00, 700.00, 'mtn_gifting_data', 'M2GBS'),
+  ('MTN', '5GB Monthly', '5GB', '30 Days', 103, 1200.00, 1500.00, 'mtn_gifting_data', 'M10GBS'),
+  ('MTN', '10GB Monthly', '10GB', '30 Days', 104, 2200.00, 2800.00, 'mtn_gifting_data', 'M14m5GBS'),
+  ('Airtel', '1GB Daily', '1GB', '1 Day', 201, 240.00, 300.00, 'airtel_data', 'A1GBS'),
+  ('Airtel', '2GB Weekly', '2GB', '7 Days', 202, 520.00, 650.00, 'airtel_data', 'A1GBS'),
+  ('Airtel', '5GB Monthly', '5GB', '30 Days', 203, 1100.00, 1400.00, 'airtel_data', 'A1GBS'),
+  ('Airtel', '10GB Monthly', '10GB', '30 Days', 204, 2160.00, 2700.00, 'airtel_data', 'A1GBS'),
+  ('Glo', '1.5GB Daily', '1.5GB', '1 Day', 301, 240.00, 300.00, 'glo_data', 'G1GBS'),
+  ('Glo', '3GB Weekly', '3GB', '7 Days', 302, 560.00, 700.00, 'glo_data', 'G1GBS'),
+  ('Glo', '7.5GB Monthly', '7.5GB', '30 Days', 303, 1200.00, 1500.00, 'glo_data', 'G1GBS'),
+  ('Glo', '15GB Monthly', '15GB', '30 Days', 304, 2200.00, 2800.00, 'glo_data', 'G1GBS'),
+  ('9mobile', '1GB Weekly', '1GB', '7 Days', 401, 320.00, 400.00, '9mobile_data', 'E1GBS'),
+  ('9mobile', '2.5GB Monthly', '2.5GB', '30 Days', 402, 800.00, 1000.00, '9mobile_data', 'E1GBS'),
+  ('9mobile', '5GB Monthly', '5GB', '30 Days', 403, 1200.00, 1500.00, '9mobile_data', 'E1GBS'),
+  ('9mobile', '11.5GB Monthly', '11.5GB', '30 Days', 404, 2400.00, 3000.00, '9mobile_data', 'E1GBS');
 
 -- 9. ROW LEVEL SECURITY
 -- Enable RLS but backend uses anon key with RLS in mind.
