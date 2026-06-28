@@ -272,4 +272,55 @@ const changePassword = async (req, res) => {
   }
 };
 
-module.exports = { register, login, getMe, changePassword };
+// PATCH /api/auth/me
+const updateMe = async (req, res) => {
+  try {
+    const { full_name, phone } = req.body;
+
+    if (!full_name || !phone) {
+      return res.status(400).json({ message: 'full_name and phone are required.' });
+    }
+
+    if (!isValidNigerianPhone(phone)) {
+      return res.status(400).json({ message: 'Phone must be 11 digits and start with 070, 080, 081, 090, or 091.' });
+    }
+
+    // Check if phone already exists for another user
+    const { data: existingPhone } = await supabase
+      .from('users')
+      .select('id')
+      .eq('phone', phone)
+      .neq('id', req.user.id)
+      .single();
+
+    if (existingPhone) {
+      return res.status(409).json({ message: 'An account with this phone number already exists.' });
+    }
+
+    const { data: updatedUser, error: updateError } = await supabase
+      .from('users')
+      .update({
+        full_name,
+        phone,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', req.user.id)
+      .select('id, full_name, email, phone, wallet_balance, role')
+      .single();
+
+    if (updateError) {
+      console.error('Update user profile error:', updateError);
+      return res.status(500).json({ message: 'Something went wrong. Please try again.' });
+    }
+
+    return res.status(200).json({
+      message: 'Profile updated successfully.',
+      user: updatedUser
+    });
+  } catch (error) {
+    console.error('Update profile error:', error);
+    return res.status(500).json({ message: 'Something went wrong. Please try again.' });
+  }
+};
+
+module.exports = { register, login, getMe, changePassword, updateMe };

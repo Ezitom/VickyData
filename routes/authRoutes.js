@@ -5,12 +5,14 @@ const {
   register,
   login,
   getMe,
-  changePassword
+  changePassword,
+  updateMe
 } = require('../controllers/authController');
 
 router.post('/register', register);
 router.post('/login', login);
 router.get('/me', authMiddleware, getMe);
+router.patch('/me', authMiddleware, updateMe);
 router.post('/change-password', authMiddleware, changePassword);
 
 module.exports = router;
