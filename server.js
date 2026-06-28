@@ -20,10 +20,17 @@ app.use(helmet());
 
 // ─── CORS ───────────────────────────────────────────────────────────────────
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
+  origin: [
+    process.env.FRONTEND_URL,
+    'https://vickydata.netlify.app',
+    'http://127.0.0.1:5500',
+    'http://localhost:5500'
+  ],
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
+app.options('*', cors());
 
 // ─── Rate Limiting ──────────────────────────────────────────────────────────
 const limiter = rateLimit({
