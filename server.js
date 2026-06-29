@@ -17,6 +17,7 @@ const PORT = process.env.PORT || 5000;
 
 // ─── Security Middleware ────────────────────────────────────────────────────
 app.use(helmet());
+app.set('trust proxy', 1);
 
 // ─── CORS ───────────────────────────────────────────────────────────────────
 app.use(cors({
