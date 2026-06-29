@@ -179,6 +179,9 @@ exports.purchaseData = async (req, res) => {
     );
     // ────────────────────────────────────────────────────────
 
+    console.log('Peyflex full response:', 
+      JSON.stringify(providerResponse.data));
+
     if (providerResponse.data.status === true ||
         providerResponse.data.status === 'success' ||
         providerResponse.data.status === 'successful') {
@@ -226,7 +229,12 @@ exports.purchaseData = async (req, res) => {
     }
 
   } catch (error) {
-    console.error('Data purchase error:', error);
+    console.error('Data purchase error details:');
+    console.error('Message:', error.message);
+    console.error('Peyflex response status:', 
+      error.response?.status);
+    console.error('Peyflex response data:', 
+      JSON.stringify(error.response?.data));
 
     // Refund wallet on failure
     try {
@@ -381,6 +389,9 @@ exports.purchaseAirtime = async (req, res) => {
     );
     // ────────────────────────────────────────────────────────
 
+    console.log('Peyflex full response:', 
+      JSON.stringify(providerResponse.data));
+
     if (providerResponse.data.status === true ||
         providerResponse.data.status === 'success' ||
         providerResponse.data.status === 'successful') {
@@ -430,7 +441,12 @@ exports.purchaseAirtime = async (req, res) => {
     }
 
   } catch (error) {
-    console.error('Airtime purchase error:', error);
+    console.error('Airtime purchase error details:');
+    console.error('Message:', error.message);
+    console.error('Peyflex response status:', 
+      error.response?.status);
+    console.error('Peyflex response data:', 
+      JSON.stringify(error.response?.data));
 
     // Refund wallet on failure
     try {
