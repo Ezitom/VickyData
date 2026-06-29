@@ -1,5 +1,5 @@
 const supabase = require('../config/supabase');
-const peyflex = require('../config/peyflex');
+const cheapDataHub = require('../config/cheapdatahub');
 const { sendMail } = require('../config/mailer');
 
 // Helper: format currency
@@ -35,17 +35,16 @@ const getOverview = async (req, res) => {
       .select('id', { count: 'exact', head: true })
       .gte('created_at', today.toISOString());
 
-    // Pending funding requests
-    const { count: pendingFunding } = await supabase
+    // Total Paystack funding transactions
+    const { count: totalFunding } = await supabase
       .from('wallet_funding')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'pending');
+      .select('id', { count: 'exact', head: true });
 
     return res.status(200).json({
       total_revenue: totalRevenue,
       total_users: totalUsers || 0,
       transactions_today: todayCount || 0,
-      pending_funding_requests: pendingFunding || 0
+      total_funding_count: totalFunding || 0
     });
   } catch (error) {
     console.error('Admin overview error:', error);
@@ -333,165 +332,7 @@ const getWalletFunding = async (req, res) => {
 };
 
 // PATCH /api/admin/wallet-funding/:id/approve
-const approveFunding = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const { data: funding, error: fetchError } = await supabase
-      .from('wallet_funding')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (fetchError || !funding) {
-      return res.status(404).json({ message: 'Funding record not found.' });
-    }
-
-    if (funding.status !== 'pending') {
-      return res.status(400).json({ message: `Cannot approve a funding request with status: ${funding.status}.` });
-    }
-
-    // Update funding status
-    await supabase
-      .from('wallet_funding')
-      .update({ status: 'successful' })
-      .eq('id', id);
-
-    // Credit user wallet
-    const { data: currentUser } = await supabase
-      .from('users')
-      .select('wallet_balance, full_name, email')
-      .eq('id', funding.user_id)
-      .single();
-
-    const newBalance = parseFloat(currentUser.wallet_balance) + parseFloat(funding.amount);
-
-    await supabase
-      .from('users')
-      .update({ wallet_balance: newBalance, updated_at: new Date().toISOString() })
-      .eq('id', funding.user_id);
-
-    // Insert transaction record
-    const txRef = `VD-TXN-${Date.now()}-${Math.floor(100000 + Math.random() * 900000)}`;
-    await supabase.from('transactions').insert({
-      user_id: funding.user_id,
-      type: 'wallet_funding',
-      amount: funding.amount,
-      reference: txRef,
-      paystack_reference: funding.paystack_reference,
-      status: 'successful'
-    });
-
-    // Send email to user
-    const firstName = currentUser.full_name.split(' ')[0];
-    const emailHtml = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <style>
-            body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }
-            .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-            .header { background: linear-gradient(135deg, #6c3de0, #a855f7); padding: 30px; text-align: center; }
-            .header h1 { color: #fff; margin: 0; font-size: 28px; letter-spacing: 2px; }
-            .body { padding: 30px; }
-            .body h2 { color: #22c55e; }
-            .body p { color: #555; line-height: 1.7; }
-            .footer { background: #f9f9f9; padding: 20px; text-align: center; font-size: 12px; color: #999; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="header"><h1>VICKYDATA</h1></div>
-            <div class="body">
-              <h2>Wallet Funded! ✅</h2>
-              <p>Hi ${firstName},</p>
-              <p>Your wallet has been credited with <strong>${formatAmount(funding.amount)}</strong>.</p>
-              <p><strong>New Wallet Balance:</strong> ${formatAmount(newBalance)}</p>
-              <p>You can now use your wallet to purchase data and airtime.</p>
-            </div>
-            <div class="footer">&copy; ${new Date().getFullYear()} VICKYDATA. All rights reserved.</div>
-          </div>
-        </body>
-      </html>
-    `;
-    sendMail(currentUser.email, 'Wallet Funded Successfully', emailHtml);
-
-    return res.status(200).json({ message: 'Funding approved successfully.' });
-  } catch (error) {
-    console.error('Admin approve funding error:', error);
-    return res.status(500).json({ message: 'Something went wrong. Please try again.' });
-  }
-};
-
-// PATCH /api/admin/wallet-funding/:id/reject
-const rejectFunding = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const { data: funding, error: fetchError } = await supabase
-      .from('wallet_funding')
-      .select('*, users (full_name, email)')
-      .eq('id', id)
-      .single();
-
-    if (fetchError || !funding) {
-      return res.status(404).json({ message: 'Funding record not found.' });
-    }
-
-    if (funding.status !== 'pending') {
-      return res.status(400).json({ message: `Cannot reject a funding request with status: ${funding.status}.` });
-    }
-
-    // Update funding status
-    await supabase
-      .from('wallet_funding')
-      .update({ status: 'failed' })
-      .eq('id', id);
-
-    // Send email to user
-    if (funding.users) {
-      const firstName = funding.users.full_name.split(' ')[0];
-      const emailHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="UTF-8">
-            <style>
-              body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }
-              .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-              .header { background: linear-gradient(135deg, #6c3de0, #a855f7); padding: 30px; text-align: center; }
-              .header h1 { color: #fff; margin: 0; font-size: 28px; letter-spacing: 2px; }
-              .body { padding: 30px; }
-              .body h2 { color: #ef4444; }
-              .body p { color: #555; line-height: 1.7; }
-              .footer { background: #f9f9f9; padding: 20px; text-align: center; font-size: 12px; color: #999; }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <div class="header"><h1>VICKYDATA</h1></div>
-              <div class="body">
-                <h2>Funding Request Rejected ❌</h2>
-                <p>Hi ${firstName},</p>
-                <p>Your wallet funding request of <strong>${formatAmount(funding.amount)}</strong> has been rejected.</p>
-                <p>If you believe this is an error, please contact our support team with your reference number.</p>
-                <p><strong>Reference:</strong> ${funding.paystack_reference}</p>
-              </div>
-              <div class="footer">&copy; ${new Date().getFullYear()} VICKYDATA. All rights reserved.</div>
-            </div>
-          </body>
-        </html>
-      `;
-      sendMail(funding.users.email, 'Wallet Funding Rejected', emailHtml);
-    }
-
-    return res.status(200).json({ message: 'Funding rejected successfully.' });
-  } catch (error) {
-    console.error('Admin reject funding error:', error);
-    return res.status(500).json({ message: 'Something went wrong. Please try again.' });
-  }
-};
+// approveFunding and rejectFunding removed as Paystack webhook handles this automatically.
 
 // GET /api/admin/settings
 const getSettings = async (req, res) => {
@@ -547,14 +388,142 @@ const updateSettings = async (req, res) => {
 };
 
 // GET /api/admin/wallet-balance
-const getAdminWalletBalance = async (req, res) => {
+const getProviderWalletBalance = async (req, res) => {
   try {
-    const response = await peyflex.get('/api/wallet/balance/');
-
-    return res.status(200).json({ balance: response.data });
+    const cheapDataHub = require('../config/cheapdatahub');
+    const response = await cheapDataHub.get(
+      '/wallet/balance/'
+    );
+    res.json({
+      balance: response.data.data.balance,
+      status: response.data.status
+    });
   } catch (error) {
-    console.error('Admin Peyflex wallet balance error:', error.response?.data || error.message);
-    return res.status(500).json({ message: 'Failed to fetch provider wallet balance.' });
+    console.error('Provider wallet balance error:', error);
+    res.status(500).json({
+      message: 'Could not fetch provider wallet balance.'
+    });
+  }
+};
+
+// POST /api/admin/sync-plans
+const syncPlans = async (req, res) => {
+  try {
+    const cheapDataHub = require('../config/cheapdatahub');
+
+    const response = await cheapDataHub.get(
+      '/data/plans/'
+    );
+
+    const cdPlans = response.data.plans || 
+                    response.data.data || [];
+
+    const syncResults = [];
+    const errors = [];
+
+    for (const cdPlan of cdPlans) {
+      try {
+        const { data: existingPlan } = await supabase
+          .from('data_plans')
+          .select('*')
+          .eq('bundle_id', cdPlan.id)
+          .single();
+
+        if (existingPlan) {
+          const oldCostPrice = 
+            parseFloat(existingPlan.cost_price);
+          const newCostPrice = 
+            parseFloat(cdPlan.api_price || cdPlan.price);
+
+          if (oldCostPrice !== newCostPrice) {
+            await supabase
+              .from('data_plans')
+              .update({ cost_price: newCostPrice })
+              .eq('id', existingPlan.id);
+
+            syncResults.push({
+              network: existingPlan.network,
+              plan: existingPlan.plan_name,
+              old_cost: oldCostPrice,
+              new_cost: newCostPrice,
+              changed: true
+            });
+          } else {
+            syncResults.push({
+              network: existingPlan.network,
+              plan: existingPlan.plan_name,
+              old_cost: oldCostPrice,
+              new_cost: newCostPrice,
+              changed: false
+            });
+          }
+        }
+      } catch (planError) {
+        errors.push({
+          plan: cdPlan.id,
+          error: planError.message
+        });
+      }
+    }
+
+    const changedPlans = syncResults.filter(p => p.changed);
+    const unchangedPlans = syncResults.filter(p => !p.changed);
+
+    const { sendMail } = require('../config/mailer');
+    await sendMail(
+      process.env.MAIL_USER,
+      'VICKYDATA - Plan Sync Complete',
+      `
+      <h2>Plan Sync Results</h2>
+      <p><strong>Total plans checked:</strong> 
+        ${syncResults.length}</p>
+      <p><strong>Plans with price changes:</strong> 
+        ${changedPlans.length}</p>
+      <p><strong>Unchanged plans:</strong> 
+        ${unchangedPlans.length}</p>
+
+      ${changedPlans.length > 0 ? `
+      <h3>Changed Plans:</h3>
+      <table border="1" cellpadding="8">
+        <tr>
+          <th>Network</th>
+          <th>Plan</th>
+          <th>Old Cost</th>
+          <th>New Cost</th>
+        </tr>
+        ${changedPlans.map(p => `
+          <tr>
+            <td>${p.network}</td>
+            <td>${p.plan}</td>
+            <td>N${p.old_cost}</td>
+            <td>N${p.new_cost}</td>
+          </tr>
+        `).join('')}
+      </table>
+      ` : '<p>No price changes found.</p>'}
+
+      <p>Log into your admin dashboard to review and 
+         adjust selling prices if needed.</p>
+      `
+    );
+
+    res.json({
+      message: 'Plans synced successfully',
+      summary: {
+        total_checked: syncResults.length,
+        changed: changedPlans.length,
+        unchanged: unchangedPlans.length,
+        errors: errors.length
+      },
+      changed_plans: changedPlans,
+      errors
+    });
+
+  } catch (error) {
+    console.error('Sync plans error:', error);
+    res.status(500).json({
+      message: 'Failed to sync plans. Please try again.'
+    });
   }
 };
 
@@ -569,9 +538,8 @@ module.exports = {
   updatePlan,
   togglePlanStatus,
   getWalletFunding,
-  approveFunding,
-  rejectFunding,
   getSettings,
   updateSettings,
-  getAdminWalletBalance
+  getProviderWalletBalance,
+  syncPlans
 };

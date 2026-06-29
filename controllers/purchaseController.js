@@ -1,5 +1,5 @@
 const supabase = require('../config/supabase');
-const peyflex = require('../config/peyflex');
+const cheapDataHub = require('../config/cheapdatahub');
 const { sendMail } = require('../config/mailer');
 
 const generateRef = (prefix) => {
@@ -59,25 +59,29 @@ exports.getPlansByNetwork = async (req, res) => {
   }
 };
 
-// ─── GET LIVE PLANS FROM PEYFLEX ──────────────────────────────
+// ─── GET LIVE PLANS FROM CHEAPDATAHUB ─────────────────────────
 exports.getLivePlans = async (req, res) => {
   try {
-    const { network } = req.query;
+    const { data: plans, error } = await supabase
+      .from('data_plans')
+      .select('*')
+      .eq('is_active', true)
+      .order('selling_price', { ascending: true });
 
-    if (!network) {
-      return res.status(400).json({
-        message: 'Network is required. e.g mtn_gifting_data'
-      });
-    }
+    if (error) throw error;
 
-    const response = await peyflex.get(
-      `/api/data/plans/?network=${network}`
-    );
+    const grouped = plans.reduce((acc, plan) => {
+      if (!acc[plan.network]) acc[plan.network] = [];
+      acc[plan.network].push(plan);
+      return acc;
+    }, {});
 
-    res.json({ plans: response.data.plans });
+    res.json({ plans: grouped });
   } catch (error) {
     console.error('Get live plans error:', error);
-    res.status(500).json({ message: 'Could not fetch plans.' });
+    res.status(500).json({ 
+      message: 'Could not fetch plans.' 
+    });
   }
 };
 
@@ -159,7 +163,7 @@ exports.purchaseData = async (req, res) => {
       status: 'pending'
     });
 
-    // Deduct wallet BEFORE calling Peyflex
+    // Deduct wallet BEFORE calling CheapDataHub
     await supabase
       .from('users')
       .update({
@@ -168,26 +172,23 @@ exports.purchaseData = async (req, res) => {
       })
       .eq('id', req.user.id);
 
-    // ── CALL PEYFLEX DATA API ───────────────────────────────
-    const providerResponse = await peyflex.post(
-      '/api/data/purchase/',
+    // ── CALL CHEAPDATAHUB DATA API ──────────────────────────
+    const providerResponse = await cheapDataHub.post(
+      '/data/purchase/',
       {
-        network: plan.peyflex_network_id,
-        mobile_number: phone_number,
-        plan_code: plan.plan_code
+        bundle_id: plan.bundle_id,
+        phone_number: phone_number
       }
     );
     // ────────────────────────────────────────────────────────
 
-    console.log('Peyflex full response:', 
+    console.log('CheapDataHub full response:', 
       JSON.stringify(providerResponse.data));
 
-    const peyflexStatus = String(providerResponse.data.status)
-      .toUpperCase();
+    const cdStatus = String(providerResponse.data.status)
+      .toLowerCase();
 
-    if (peyflexStatus === 'SUCCESS' || 
-        peyflexStatus === 'SUCCESSFUL' ||
-        peyflexStatus === 'TRUE') {
+    if (cdStatus === 'true' || cdStatus === 'success') {
 
       await supabase
         .from('transactions')
@@ -234,9 +235,9 @@ exports.purchaseData = async (req, res) => {
   } catch (error) {
     console.error('Data purchase error details:');
     console.error('Message:', error.message);
-    console.error('Peyflex response status:', 
+    console.error('CheapDataHub response status:', 
       error.response?.status);
-    console.error('Peyflex response data:', 
+    console.error('CheapDataHub response data:', 
       JSON.stringify(error.response?.data));
 
     // Refund wallet on failure
@@ -353,26 +354,34 @@ exports.purchaseAirtime = async (req, res) => {
     // Generate reference
     const reference = generateRef('VD-AIR');
 
+    const networkMap = {
+      'mtn': 1,
+      'glo': 2,
+      'airtel': 3,
+      '9mobile': 4
+    };
+    const provider_id = networkMap[String(network).toLowerCase()] || network;
+
     // Network name map
     const networkNames = {
-      mtn: 'MTN',
-      airtel: 'Airtel',
-      glo: 'Glo',
-      '9mobile': '9mobile'
+      1: 'MTN',
+      2: 'Glo',
+      3: 'Airtel',
+      4: '9mobile'
     };
 
     // Insert pending transaction
     await supabase.from('transactions').insert({
       user_id: req.user.id,
       type: 'airtime',
-      network: networkNames[network] || network,
+      network: networkNames[provider_id] || network,
       phone_number,
       amount: parseFloat(amount),
       reference,
       status: 'pending'
     });
 
-    // Deduct wallet BEFORE calling Peyflex
+    // Deduct wallet BEFORE calling CheapDataHub
     await supabase
       .from('users')
       .update({
@@ -381,26 +390,24 @@ exports.purchaseAirtime = async (req, res) => {
       })
       .eq('id', req.user.id);
 
-    // ── CALL PEYFLEX AIRTIME API ────────────────────────────
-    const providerResponse = await peyflex.post(
-      '/api/airtime/topup/',
+    // ── CALL CHEAPDATAHUB AIRTIME API ───────────────────────
+    const providerResponse = await cheapDataHub.post(
+      '/airtime/purchase/',
       {
-        network: network,
-        mobile_number: phone_number,
+        provider_id: parseInt(provider_id),
+        phone_number: phone_number,
         amount: parseFloat(amount)
       }
     );
     // ────────────────────────────────────────────────────────
 
-    console.log('Peyflex full response:', 
+    console.log('CheapDataHub full response:', 
       JSON.stringify(providerResponse.data));
 
-    const peyflexStatus = String(providerResponse.data.status)
-      .toUpperCase();
+    const cdStatus = String(providerResponse.data.status)
+      .toLowerCase();
 
-    if (peyflexStatus === 'SUCCESS' || 
-        peyflexStatus === 'SUCCESSFUL' ||
-        peyflexStatus === 'TRUE') {
+    if (cdStatus === 'true' || cdStatus === 'success') {
 
       await supabase
         .from('transactions')
@@ -425,7 +432,7 @@ exports.purchaseAirtime = async (req, res) => {
         <p>Your airtime purchase was successful. Details:</p>
         <ul>
           <li><strong>Network:</strong>
-            ${networkNames[network] || network}</li>
+            ${networkNames[provider_id] || network}</li>
           <li><strong>Phone:</strong> ${phone_number}</li>
           <li><strong>Amount:</strong> ${formatNaira(amount)}</li>
           <li><strong>New Balance:</strong>
@@ -449,9 +456,9 @@ exports.purchaseAirtime = async (req, res) => {
   } catch (error) {
     console.error('Airtime purchase error details:');
     console.error('Message:', error.message);
-    console.error('Peyflex response status:', 
+    console.error('CheapDataHub response status:', 
       error.response?.status);
-    console.error('Peyflex response data:', 
+    console.error('CheapDataHub response data:', 
       JSON.stringify(error.response?.data));
 
     // Refund wallet on failure

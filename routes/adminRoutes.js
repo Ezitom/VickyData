@@ -13,11 +13,10 @@ const {
   updatePlan,
   togglePlanStatus,
   getWalletFunding,
-  approveFunding,
-  rejectFunding,
   getSettings,
   updateSettings,
-  getAdminWalletBalance
+  getProviderWalletBalance,
+  syncPlans
 } = require('../controllers/adminController');
 
 // Apply both middlewares to all admin routes
@@ -32,12 +31,11 @@ router.get('/plans', getPlans);
 router.post('/plans', createPlan);
 router.patch('/plans/:id', updatePlan);
 router.patch('/plans/:id/toggle-status', togglePlanStatus);
+router.post('/sync-plans', syncPlans);
 router.get('/wallet-funding', getWalletFunding);
-router.patch('/wallet-funding/:id/approve', approveFunding);
-router.patch('/wallet-funding/:id/reject', rejectFunding);
 router.get('/settings', getSettings);
 router.patch('/settings', updateSettings);
 router.put('/settings', updateSettings);
-router.get('/wallet-balance', getAdminWalletBalance);
+router.get('/wallet-balance', getProviderWalletBalance);
 
 module.exports = router;
