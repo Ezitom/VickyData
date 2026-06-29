@@ -182,9 +182,12 @@ exports.purchaseData = async (req, res) => {
     console.log('Peyflex full response:', 
       JSON.stringify(providerResponse.data));
 
-    if (providerResponse.data.status === true ||
-        providerResponse.data.status === 'success' ||
-        providerResponse.data.status === 'successful') {
+    const peyflexStatus = String(providerResponse.data.status)
+      .toUpperCase();
+
+    if (peyflexStatus === 'SUCCESS' || 
+        peyflexStatus === 'SUCCESSFUL' ||
+        peyflexStatus === 'TRUE') {
 
       await supabase
         .from('transactions')
@@ -392,9 +395,12 @@ exports.purchaseAirtime = async (req, res) => {
     console.log('Peyflex full response:', 
       JSON.stringify(providerResponse.data));
 
-    if (providerResponse.data.status === true ||
-        providerResponse.data.status === 'success' ||
-        providerResponse.data.status === 'successful') {
+    const peyflexStatus = String(providerResponse.data.status)
+      .toUpperCase();
+
+    if (peyflexStatus === 'SUCCESS' || 
+        peyflexStatus === 'SUCCESSFUL' ||
+        peyflexStatus === 'TRUE') {
 
       await supabase
         .from('transactions')
