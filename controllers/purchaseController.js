@@ -1,6 +1,7 @@
 const supabase = require('../config/supabase');
 const cheapDataHub = require('../config/cheapdatahub');
 const { sendMail } = require('../config/mailer');
+const { resolveProviderBundleId } = require('../utils/providerPlanResolver');
 
 const generateRef = (prefix) => {
   const timestamp = Date.now();
@@ -173,10 +174,29 @@ exports.purchaseData = async (req, res) => {
       .eq('id', req.user.id);
 
     // ── CALL CHEAPDATAHUB DATA API ──────────────────────────
+    let resolvedBundleId = plan.bundle_id;
+
+    try {
+      const providerBundleId = await resolveProviderBundleId(plan, cheapDataHub);
+      if (providerBundleId) {
+        resolvedBundleId = providerBundleId;
+        await supabase
+          .from('data_plans')
+          .update({ bundle_id: providerBundleId })
+          .eq('id', plan.id);
+      }
+    } catch (bundleError) {
+      console.warn('Bundle resolution warning:', bundleError.message);
+    }
+
+    if (!resolvedBundleId) {
+      throw new Error('No valid bundle ID found for the selected plan.');
+    }
+
     const providerResponse = await cheapDataHub.post(
       '/data/purchase/',
       {
-        bundle_id: plan.bundle_id,
+        bundle_id: resolvedBundleId,
         phone_number: phone_number
       }
     );
@@ -287,8 +307,15 @@ exports.purchaseData = async (req, res) => {
       console.error('Refund error:', refundError);
     }
 
-    res.status(500).json({
-      message: 'Data purchase failed. Your wallet has been refunded.'
+    const providerMessage =
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.response?.data?.detail ||
+      error.response?.data?.data?.message ||
+      error.message;
+
+    res.status(502).json({
+      message: providerMessage || 'Data purchase failed. Your wallet has been refunded.'
     });
   }
 };
