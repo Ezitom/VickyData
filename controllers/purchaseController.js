@@ -209,8 +209,16 @@ exports.purchaseData = async (req, res) => {
       throw new Error('No valid bundle ID found for the selected plan.');
     }
 
+    const networkMap = {
+      'mtn': 1,
+      'glo': 2,
+      '9mobile': 3,
+      'airtel': 4
+    };
+    const providerNetworkId = networkMap[String(plan.network).toLowerCase()] || plan.network_id;
+
     console.log('Calling PeaceSub data API with:', {
-      network: plan.network_id,
+      network: providerNetworkId,
       mobile_number: phone_number,
       plan: plan.bundle_id,
       Ported_number: true
@@ -219,7 +227,7 @@ exports.purchaseData = async (req, res) => {
     const providerResponse = await peaceSub.post(
       '/data/',
       {
-        network: plan.network_id,
+        network: providerNetworkId,
         mobile_number: phone_number,
         plan: plan.bundle_id,
         Ported_number: true
@@ -430,8 +438,8 @@ exports.purchaseAirtime = async (req, res) => {
     const networkMap = {
       'mtn': 1,
       'glo': 2,
-      'airtel': 3,
-      '9mobile': 4
+      '9mobile': 3,
+      'airtel': 4
     };
     const provider_id = networkMap[String(network).toLowerCase()] || network;
 
