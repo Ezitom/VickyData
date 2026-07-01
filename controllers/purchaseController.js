@@ -209,6 +209,13 @@ exports.purchaseData = async (req, res) => {
       throw new Error('No valid bundle ID found for the selected plan.');
     }
 
+    console.log('Calling PeaceSub data API with:', {
+      network: plan.network_id,
+      mobile_number: phone_number,
+      plan: plan.bundle_id,
+      Ported_number: true
+    });
+
     const providerResponse = await peaceSub.post(
       '/data/',
       {
@@ -220,7 +227,7 @@ exports.purchaseData = async (req, res) => {
     );
     // ────────────────────────────────────────────────────────
 
-    console.log('PeaceSub full response:', 
+    console.log('PeaceSub data response:', 
       JSON.stringify(providerResponse.data));
 
     const psStatus = String(
@@ -279,14 +286,32 @@ exports.purchaseData = async (req, res) => {
     }
 
   } catch (error) {
-    console.error('Data purchase error details:');
-    console.error('Message:', error.message);
-    console.error('CheapDataHub response status:', 
-      error.response?.status);
-    console.error('CheapDataHub response data:', 
-      JSON.stringify(error.response?.data));
+    console.error('Data purchase error:', error.message);
+    console.error('Error code:', error.code);
 
-    // Refund wallet on failure
+    // If it is a timeout error, do not refund immediately
+    // The purchase may have gone through on PeaceSub's end
+    if (error.code === 'ECONNABORTED' || 
+        error.message.includes('timeout')) {
+      
+      // Update transaction to pending instead of failed
+      await supabase
+        .from('transactions')
+        .update({ status: 'pending' })
+        .eq('user_id', req.user.id)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      return res.status(202).json({
+        message: 'Your purchase is being processed. ' +
+                 'Check your transaction history in a few ' +
+                 'minutes to confirm delivery.',
+        status: 'processing'
+      });
+    }
+
+    // For all other errors, refund the wallet
     try {
       const { data: currentUser } = await supabase
         .from('users')
@@ -317,15 +342,17 @@ exports.purchaseData = async (req, res) => {
         .eq('status', 'pending');
 
       if (currentUser) {
+        const { sendMail } = require('../config/mailer');
         await sendMail(
           currentUser.email,
           'Data Purchase Failed - VICKYDATA',
           `
           <h2>Data Purchase Failed</h2>
           <p>Hi ${currentUser.full_name},</p>
-          <p>Your data purchase could not be completed.
-             Your wallet has been refunded.</p>
-          <p>Reference: ${req.body.reference || 'N/A'}</p>
+          <p>Your data purchase could not be completed 
+             and your wallet has been refunded.</p>
+          <p>If you keep experiencing this issue, 
+             please contact support.</p>
           `
         );
       }
@@ -333,15 +360,8 @@ exports.purchaseData = async (req, res) => {
       console.error('Refund error:', refundError);
     }
 
-    const providerMessage =
-      error.response?.data?.message ||
-      error.response?.data?.error ||
-      error.response?.data?.detail ||
-      error.response?.data?.data?.message ||
-      error.message;
-
-    res.status(502).json({
-      message: providerMessage || 'Data purchase failed. Your wallet has been refunded.'
+    res.status(500).json({
+      message: 'Data purchase failed. Your wallet has been refunded.'
     });
   }
 };
@@ -446,6 +466,14 @@ exports.purchaseAirtime = async (req, res) => {
       .eq('id', req.user.id);
 
     // ── CALL PEACESUB AIRTIME API ───────────────────────
+    console.log('Calling PeaceSub airtime API with:', {
+      network: parseInt(provider_id),
+      mobile_number: phone_number,
+      amount: parseFloat(amount),
+      Ported_number: true,
+      airtime_type: 'VTU'
+    });
+
     const providerResponse = await peaceSub.post(
       '/topup/',
       {
@@ -458,7 +486,7 @@ exports.purchaseAirtime = async (req, res) => {
     );
     // ────────────────────────────────────────────────────────
 
-    console.log('PeaceSub full response:', 
+    console.log('PeaceSub airtime response:', 
       JSON.stringify(providerResponse.data));
 
     const psStatus = String(
@@ -516,14 +544,28 @@ exports.purchaseAirtime = async (req, res) => {
     }
 
   } catch (error) {
-    console.error('Airtime purchase error details:');
-    console.error('Message:', error.message);
-    console.error('CheapDataHub response status:', 
-      error.response?.status);
-    console.error('CheapDataHub response data:', 
-      JSON.stringify(error.response?.data));
+    console.error('Airtime purchase error:', error.message);
+    console.error('Error code:', error.code);
 
-    // Refund wallet on failure
+    if (error.code === 'ECONNABORTED' || 
+        error.message.includes('timeout')) {
+      
+      await supabase
+        .from('transactions')
+        .update({ status: 'pending' })
+        .eq('user_id', req.user.id)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      return res.status(202).json({
+        message: 'Your purchase is being processed. ' +
+                 'Check your transaction history in a few ' +
+                 'minutes to confirm delivery.',
+        status: 'processing'
+      });
+    }
+
     try {
       const { data: currentUser } = await supabase
         .from('users')
@@ -546,14 +588,15 @@ exports.purchaseAirtime = async (req, res) => {
           .eq('user_id', req.user.id)
           .eq('status', 'pending');
 
+        const { sendMail } = require('../config/mailer');
         await sendMail(
           currentUser.email,
           'Airtime Purchase Failed - VICKYDATA',
           `
           <h2>Airtime Purchase Failed</h2>
           <p>Hi ${currentUser.full_name},</p>
-          <p>Your airtime purchase could not be completed.
-             Your wallet has been refunded.</p>
+          <p>Your airtime purchase could not be completed 
+             and your wallet has been refunded.</p>
           `
         );
       }
@@ -561,12 +604,8 @@ exports.purchaseAirtime = async (req, res) => {
       console.error('Refund error:', refundError);
     }
 
-    const providerMessage = error.response?.data ?
-      getProviderErrorMessage(error.response.data, error.message) :
-      error.message;
-
     res.status(500).json({
-      message: providerMessage || 'Airtime purchase failed. Your wallet has been refunded.'
+      message: 'Airtime purchase failed. Your wallet has been refunded.'
     });
   }
 };
