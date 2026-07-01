@@ -1,5 +1,5 @@
 const supabase = require('../config/supabase');
-const cheapDataHub = require('../config/cheapdatahub');
+const peaceSub = require('../config/peacesub');
 const { sendMail } = require('../config/mailer');
 const { resolveProviderBundleId } = require('../utils/providerPlanResolver');
 
@@ -13,6 +13,22 @@ const formatNaira = (amount) => {
   return `N${Number(amount).toLocaleString('en-NG', {
     minimumFractionDigits: 2
   })}`;
+};
+
+const isProviderSuccess = (responseData) => {
+  const status = String(responseData?.status ?? '').toLowerCase();
+  return [
+    'true',
+    'success',
+    'successful',
+    '1',
+    'ok'
+  ].includes(status) || responseData?.success === true || responseData?.status === 1;
+};
+
+const getProviderErrorMessage = (responseData, defaultMsg = 'Provider returned failure status') => {
+  if (!responseData) return defaultMsg;
+  return responseData.message || responseData.error || responseData.detail || String(responseData.status || defaultMsg);
 };
 
 // ─── GET ALL PLANS ────────────────────────────────────────────
@@ -173,11 +189,11 @@ exports.purchaseData = async (req, res) => {
       })
       .eq('id', req.user.id);
 
-    // ── CALL CHEAPDATAHUB DATA API ──────────────────────────
+    // ── CALL PEACESUB DATA API ──────────────────────────
     let resolvedBundleId = plan.bundle_id;
 
     try {
-      const providerBundleId = await resolveProviderBundleId(plan, cheapDataHub);
+      const providerBundleId = await resolveProviderBundleId(plan, peaceSub);
       if (providerBundleId) {
         resolvedBundleId = providerBundleId;
         await supabase
@@ -193,28 +209,37 @@ exports.purchaseData = async (req, res) => {
       throw new Error('No valid bundle ID found for the selected plan.');
     }
 
-    const providerResponse = await cheapDataHub.post(
-      '/data/purchase/',
+    const providerResponse = await peaceSub.post(
+      '/data/',
       {
-        bundle_id: resolvedBundleId,
-        phone_number: phone_number
+        network: plan.network_id,
+        mobile_number: phone_number,
+        plan: plan.bundle_id,
+        Ported_number: true
       }
     );
     // ────────────────────────────────────────────────────────
 
-    console.log('CheapDataHub full response:', 
+    console.log('PeaceSub full response:', 
       JSON.stringify(providerResponse.data));
 
-    const cdStatus = String(providerResponse.data.status)
-      .toLowerCase();
+    const psStatus = String(
+      providerResponse.data.Status ||
+      providerResponse.data.status ||
+      ''
+    ).toLowerCase();
 
-    if (cdStatus === 'true' || cdStatus === 'success') {
-
+    if (psStatus === 'successful' ||
+        psStatus === 'success' ||
+        psStatus === 'true') {
       await supabase
         .from('transactions')
         .update({
           status: 'successful',
-          provider_reference: providerResponse.data.reference || null
+          provider_reference: 
+            providerResponse.data.ident || 
+            String(providerResponse.data.id) || 
+            null
         })
         .eq('reference', reference);
 
@@ -249,7 +274,8 @@ exports.purchaseData = async (req, res) => {
       });
 
     } else {
-      throw new Error('Provider returned failure status');
+      const providerMessage = getProviderErrorMessage(providerResponse.data);
+      throw new Error(providerMessage);
     }
 
   } catch (error) {
@@ -393,15 +419,17 @@ exports.purchaseAirtime = async (req, res) => {
     const networkNames = {
       1: 'MTN',
       2: 'Glo',
-      3: 'Airtel',
-      4: '9mobile'
+      3: '9mobile',
+      4: 'Airtel'
     };
+
+    const providerNetwork = networkNames[provider_id] || String(network).toUpperCase();
 
     // Insert pending transaction
     await supabase.from('transactions').insert({
       user_id: req.user.id,
       type: 'airtime',
-      network: networkNames[provider_id] || network,
+      network: providerNetwork,
       phone_number,
       amount: parseFloat(amount),
       reference,
@@ -417,32 +445,38 @@ exports.purchaseAirtime = async (req, res) => {
       })
       .eq('id', req.user.id);
 
-    // ── CALL CHEAPDATAHUB AIRTIME API ───────────────────────
-    const providerResponse = await cheapDataHub.post(
-      '/airtime/purchase/',
+    // ── CALL PEACESUB AIRTIME API ───────────────────────
+    const providerResponse = await peaceSub.post(
+      '/topup/',
       {
-        provider_id: parseInt(provider_id),
-        phone_number: phone_number,
-        amount: parseFloat(amount)
+        network: parseInt(provider_id),
+        mobile_number: phone_number,
+        amount: parseFloat(amount),
+        Ported_number: true,
+        airtime_type: 'VTU'
       }
     );
     // ────────────────────────────────────────────────────────
 
-    console.log('CheapDataHub full response:', 
+    console.log('PeaceSub full response:', 
       JSON.stringify(providerResponse.data));
 
-    const cdStatus = String(providerResponse.data.status)
-      .toLowerCase();
+    const psStatus = String(
+      providerResponse.data.Status ||
+      providerResponse.data.status ||
+      ''
+    ).toLowerCase();
 
-    if (cdStatus === 'true' || cdStatus === 'success') {
-
+    if (psStatus === 'successful' ||
+        psStatus === 'success' ||
+        psStatus === 'true') {
       await supabase
         .from('transactions')
         .update({
           status: 'successful',
-          provider_reference:
-            providerResponse.data.reference ||
-            String(providerResponse.data.transaction_id) ||
+          provider_reference: 
+            providerResponse.data.ident || 
+            String(providerResponse.data.id) || 
             null
         })
         .eq('reference', reference);
@@ -477,7 +511,8 @@ exports.purchaseAirtime = async (req, res) => {
       });
 
     } else {
-      throw new Error('Provider returned failure status');
+      const providerMessage = getProviderErrorMessage(providerResponse.data);
+      throw new Error(providerMessage);
     }
 
   } catch (error) {
@@ -526,8 +561,12 @@ exports.purchaseAirtime = async (req, res) => {
       console.error('Refund error:', refundError);
     }
 
+    const providerMessage = error.response?.data ?
+      getProviderErrorMessage(error.response.data, error.message) :
+      error.message;
+
     res.status(500).json({
-      message: 'Airtime purchase failed. Your wallet has been refunded.'
+      message: providerMessage || 'Airtime purchase failed. Your wallet has been refunded.'
     });
   }
 };

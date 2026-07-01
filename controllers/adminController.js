@@ -1,5 +1,5 @@
 const supabase = require('../config/supabase');
-const cheapDataHub = require('../config/cheapdatahub');
+const peaceSub = require('../config/peacesub');
 const { sendMail } = require('../config/mailer');
 const { findProviderPlanMatch } = require('../utils/providerPlanResolver');
 
@@ -391,13 +391,11 @@ const updateSettings = async (req, res) => {
 // GET /api/admin/wallet-balance
 const getProviderWalletBalance = async (req, res) => {
   try {
-    const cheapDataHub = require('../config/cheapdatahub');
-    const response = await cheapDataHub.get(
-      '/wallet/balance/'
-    );
+    const peaceSub = require('../config/peacesub');
+    const response = await peaceSub.get('/user/');
     res.json({
-      balance: response.data.data.balance,
-      status: response.data.status
+      balance: response.data.wallet_balance || 
+               response.data.balance || 0
     });
   } catch (error) {
     console.error('Provider wallet balance error:', error);
@@ -410,78 +408,54 @@ const getProviderWalletBalance = async (req, res) => {
 // POST /api/admin/sync-plans
 const syncPlans = async (req, res) => {
   try {
-    const cheapDataHub = require('../config/cheapdatahub');
+    const peaceSub = require('../config/peacesub');
 
-    const response = await cheapDataHub.get(
-      '/data/plans/'
-    );
-
-    const cdPlans = response.data.plans || 
-                    response.data.data || [];
+    const response = await peaceSub.get('/dataplans/');
+    const psPlans = response.data || [];
 
     const syncResults = [];
     const errors = [];
 
-    for (const cdPlan of cdPlans) {
+    for (const psPlan of psPlans) {
       try {
         const { data: existingPlan } = await supabase
           .from('data_plans')
           .select('*')
-          .eq('bundle_id', cdPlan.id)
+          .eq('bundle_id', psPlan.id)
           .single();
 
-        let matchedPlan = existingPlan;
-
-        if (!matchedPlan) {
-          const { data: allPlans } = await supabase
-            .from('data_plans')
-            .select('*')
-            .eq('is_active', true);
-
-          matchedPlan = findProviderPlanMatch(
-            {
-              network: cdPlan.network || cdPlan.operator || cdPlan.provider,
-              size: cdPlan.size || cdPlan.data_size || cdPlan.bundle_size,
-              validity: cdPlan.validity || cdPlan.duration || cdPlan.validity_period,
-              plan_name: cdPlan.plan_name || cdPlan.name || cdPlan.title
-            },
-            allPlans || []
-          );
-        }
-
-        if (matchedPlan) {
+        if (existingPlan) {
           const oldCostPrice = 
-            parseFloat(matchedPlan.cost_price);
+            parseFloat(existingPlan.cost_price);
           const newCostPrice = 
-            parseFloat(cdPlan.api_price || cdPlan.price);
-          const updateFields = {};
+            parseFloat(psPlan.plan_amount);
 
-          if (newCostPrice > 0) {
-            updateFields.cost_price = newCostPrice;
-          }
-
-          if (!matchedPlan.bundle_id || String(matchedPlan.bundle_id).includes('placeholder')) {
-            updateFields.bundle_id = cdPlan.id;
-          }
-
-          if (Object.keys(updateFields).length > 0) {
+          if (oldCostPrice !== newCostPrice) {
             await supabase
               .from('data_plans')
-              .update(updateFields)
-              .eq('id', matchedPlan.id);
-          }
+              .update({ cost_price: newCostPrice })
+              .eq('id', existingPlan.id);
 
-          syncResults.push({
-            network: matchedPlan.network,
-            plan: matchedPlan.plan_name,
-            old_cost: oldCostPrice,
-            new_cost: newCostPrice,
-            changed: Object.keys(updateFields).length > 0
-          });
+            syncResults.push({
+              network: existingPlan.network,
+              plan: existingPlan.plan_name,
+              old_cost: oldCostPrice,
+              new_cost: newCostPrice,
+              changed: true
+            });
+          } else {
+            syncResults.push({
+              network: existingPlan.network,
+              plan: existingPlan.plan_name,
+              old_cost: oldCostPrice,
+              new_cost: newCostPrice,
+              changed: false
+            });
+          }
         }
       } catch (planError) {
         errors.push({
-          plan: cdPlan.id,
+          plan: psPlan.id,
           error: planError.message
         });
       }
