@@ -61,7 +61,80 @@ CREATE TABLE wallet_funding (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 5. SITE SETTINGS TABLE
+-- 5. MANUAL WALLET FUNDING TABLES
+CREATE TABLE IF NOT EXISTS wallets (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  balance DECIMAL(12,2) DEFAULT 0.00,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS funding_requests (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  reference_code VARCHAR(20) UNIQUE NOT NULL,
+  amount_claimed DECIMAL(12,2) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'confirmed', 'rejected', 'expired')),
+  proof_note TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  reviewed_at TIMESTAMP WITH TIME ZONE,
+  reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS wallet_transactions (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  wallet_id UUID NOT NULL REFERENCES wallets(id) ON DELETE CASCADE,
+  funding_request_id UUID REFERENCES funding_requests(id) ON DELETE SET NULL,
+  type VARCHAR(10) NOT NULL CHECK (type IN ('credit', 'debit')),
+  amount DECIMAL(12,2) NOT NULL,
+  balance_after DECIMAL(12,2) NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE OR REPLACE FUNCTION credit_funding_request_wallet(p_funding_request_id UUID, p_admin_id UUID)
+RETURNS JSON AS $$
+DECLARE
+  v_request funding_requests%ROWTYPE;
+  v_wallet wallets%ROWTYPE;
+  v_new_balance DECIMAL(12,2);
+BEGIN
+  SELECT * INTO v_request FROM funding_requests WHERE id = p_funding_request_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Funding request not found';
+  END IF;
+
+  IF v_request.status <> 'pending' THEN
+    RAISE EXCEPTION 'Funding request already processed';
+  END IF;
+
+  INSERT INTO wallets (user_id, balance, updated_at)
+  VALUES (v_request.user_id, 0, NOW())
+  ON CONFLICT (user_id) DO NOTHING;
+
+  SELECT * INTO v_wallet FROM wallets WHERE user_id = v_request.user_id FOR UPDATE;
+
+  v_new_balance := COALESCE(v_wallet.balance, 0) + v_request.amount_claimed;
+
+  UPDATE wallets
+  SET balance = v_new_balance,
+      updated_at = NOW()
+  WHERE id = v_wallet.id;
+
+  INSERT INTO wallet_transactions (wallet_id, funding_request_id, type, amount, balance_after, created_at)
+  VALUES (v_wallet.id, v_request.id, 'credit', v_request.amount_claimed, v_new_balance, NOW());
+
+  UPDATE funding_requests
+  SET status = 'confirmed',
+      reviewed_at = NOW(),
+      reviewed_by = p_admin_id
+  WHERE id = v_request.id;
+
+  RETURN json_build_object('success', true, 'new_balance', v_new_balance, 'wallet_id', v_wallet.id);
+END;
+$$ LANGUAGE plpgsql;
+
+-- 6. SITE SETTINGS TABLE
 CREATE TABLE site_settings (
   id SERIAL PRIMARY KEY,
   setting_key VARCHAR(100) UNIQUE NOT NULL,
@@ -69,7 +142,7 @@ CREATE TABLE site_settings (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 6. DEFAULT SITE SETTINGS
+-- 7. DEFAULT SITE SETTINGS
 INSERT INTO site_settings (setting_key, setting_value) VALUES
   ('site_name', 'VICKYDATA'),
   ('min_wallet_funding', '100'),
@@ -78,7 +151,7 @@ INSERT INTO site_settings (setting_key, setting_value) VALUES
   ('email_new_user', 'true'),
   ('email_failed_transaction', 'true');
 
--- 7. DEFAULT ADMIN USER
+-- 8. DEFAULT ADMIN USER
 -- IMPORTANT: After setup, use the /api/auth/change-password endpoint
 -- or re-insert with a proper bcrypt hash generated from your chosen password.
 INSERT INTO users (full_name, email, phone, password_hash, role)
@@ -90,7 +163,7 @@ VALUES (
   'admin'
 );
 
--- 8. SEED DATA PLANS
+-- 9. SEED DATA PLANS
 -- NOTE: Replace bundle_id values with real IDs from your CheapDataHub dashboard!
 INSERT INTO data_plans
   (network, plan_name, size, validity, bundle_id, cost_price, selling_price, peyflex_network_id, plan_code)
@@ -120,6 +193,9 @@ ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wallet_funding ENABLE ROW LEVEL SECURITY;
 ALTER TABLE data_plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE site_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wallets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE funding_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wallet_transactions ENABLE ROW LEVEL SECURITY;
 
 -- 10. RLS POLICIES (allow all access via service role / bypass for backend)
 -- If using anon key on backend, add these permissive policies:
@@ -128,6 +204,9 @@ CREATE POLICY "Allow all for anon" ON transactions FOR ALL USING (true) WITH CHE
 CREATE POLICY "Allow all for anon" ON wallet_funding FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all for anon" ON data_plans FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all for anon" ON site_settings FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for anon" ON wallets FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for anon" ON funding_requests FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for anon" ON wallet_transactions FOR ALL USING (true) WITH CHECK (true);
 
 -- ALTERNATIVE: Use the Supabase service_role key in .env instead of anon key,
 -- which bypasses RLS entirely. Recommended for backend-only access.
