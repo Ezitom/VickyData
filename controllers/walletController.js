@@ -448,7 +448,7 @@ const listAdminFundingRequests = async (req, res) => {
       .from('funding_requests')
       .select(`
         *,
-        users (id, full_name, email, phone)
+        users!user_id (id, full_name, email, phone)
       `)
       .order('created_at', { ascending: true });
 
