@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const supabase = require('../config/supabase');
 const { sendMail } = require('../config/mailer');
 
@@ -323,4 +324,159 @@ const updateMe = async (req, res) => {
   }
 };
 
-module.exports = { register, login, getMe, changePassword, updateMe };
+// POST /api/auth/forgot-password
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required.' });
+    }
+
+    // Look up user — always return the same message to prevent email enumeration
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, full_name, email')
+      .eq('email', email.toLowerCase())
+      .single();
+
+    if (user) {
+      // Generate a 6-digit OTP token
+      const token = crypto.randomInt(100000, 999999).toString();
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 min
+
+      // Delete any existing reset tokens for this user
+      await supabase
+        .from('password_resets')
+        .delete()
+        .eq('user_id', user.id);
+
+      // Store new token
+      const { error: insertError } = await supabase
+        .from('password_resets')
+        .insert({ user_id: user.id, token, expires_at: expiresAt });
+
+      if (insertError) {
+        console.error('Password reset insert error:', insertError);
+        return res.status(500).json({ message: 'Something went wrong. Please try again.' });
+      }
+
+      // Send reset email
+      const firstName = user.full_name.split(' ')[0];
+      const resetHtml = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="UTF-8">
+            <style>
+              body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }
+              .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+              .header { background: linear-gradient(135deg, #00C6AE, #009E8E); padding: 30px; text-align: center; }
+              .header h1 { color: #fff; margin: 0; font-size: 28px; letter-spacing: 2px; }
+              .body { padding: 30px; }
+              .body h2 { color: #333; }
+              .body p { color: #555; line-height: 1.7; }
+              .otp-box { display: block; width: fit-content; margin: 24px auto; background: #f0fffe; border: 2px dashed #00C6AE; border-radius: 12px; padding: 16px 40px; text-align: center; }
+              .otp-code { font-size: 42px; font-weight: bold; color: #00C6AE; letter-spacing: 8px; font-family: monospace; }
+              .footer { background: #f9f9f9; padding: 20px; text-align: center; font-size: 12px; color: #999; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="header"><h1>VICKYDATA</h1></div>
+              <div class="body">
+                <h2>Password Reset Request</h2>
+                <p>Hi ${firstName},</p>
+                <p>We received a request to reset your VICKYDATA account password. Use the OTP code below to reset your password. This code expires in <strong>15 minutes</strong>.</p>
+                <div class="otp-box">
+                  <div class="otp-code">${token}</div>
+                </div>
+                <p>Enter this code on the password reset page along with your new password.</p>
+                <p>If you did not request a password reset, you can safely ignore this email — your password will not change.</p>
+              </div>
+              <div class="footer">&copy; ${new Date().getFullYear()} VICKYDATA. All rights reserved.</div>
+            </div>
+          </body>
+        </html>
+      `;
+
+      sendMail(user.email, 'VICKYDATA - Password Reset OTP', resetHtml);
+    }
+
+    // Always return success to prevent email enumeration
+    return res.status(200).json({
+      message: 'If an account with that email exists, a reset code has been sent.'
+    });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    return res.status(500).json({ message: 'Something went wrong. Please try again.' });
+  }
+};
+
+// POST /api/auth/reset-password
+const resetPassword = async (req, res) => {
+  try {
+    const { email, token, new_password } = req.body;
+
+    if (!email || !token || !new_password) {
+      return res.status(400).json({ message: 'email, token, and new_password are required.' });
+    }
+
+    if (new_password.length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters.' });
+    }
+
+    // Look up user
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, email')
+      .eq('email', email.toLowerCase())
+      .single();
+
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid or expired reset code.' });
+    }
+
+    // Look up reset token
+    const { data: resetRecord } = await supabase
+      .from('password_resets')
+      .select('token, expires_at')
+      .eq('user_id', user.id)
+      .eq('token', token)
+      .single();
+
+    if (!resetRecord) {
+      return res.status(400).json({ message: 'Invalid or expired reset code.' });
+    }
+
+    // Check expiry
+    if (new Date() > new Date(resetRecord.expires_at)) {
+      await supabase.from('password_resets').delete().eq('user_id', user.id);
+      return res.status(400).json({ message: 'Reset code has expired. Please request a new one.' });
+    }
+
+    // Hash new password
+    const password_hash = await bcrypt.hash(new_password, 10);
+
+    // Update user password
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({ password_hash, updated_at: new Date().toISOString() })
+      .eq('id', user.id);
+
+    if (updateError) {
+      console.error('Reset password update error:', updateError);
+      return res.status(500).json({ message: 'Something went wrong. Please try again.' });
+    }
+
+    // Delete used token
+    await supabase.from('password_resets').delete().eq('user_id', user.id);
+
+    return res.status(200).json({ message: 'Password reset successfully. You can now log in.' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    return res.status(500).json({ message: 'Something went wrong. Please try again.' });
+  }
+};
+
+module.exports = { register, login, getMe, changePassword, updateMe, forgotPassword, resetPassword };

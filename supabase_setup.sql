@@ -131,3 +131,23 @@ CREATE POLICY "Allow all for anon" ON site_settings FOR ALL USING (true) WITH CH
 
 -- ALTERNATIVE: Use the Supabase service_role key in .env instead of anon key,
 -- which bypasses RLS entirely. Recommended for backend-only access.
+
+-- ============================================================
+-- 11. PASSWORD RESETS TABLE
+-- Stores short-lived OTP tokens for the forgot-password flow.
+-- Run this in the Supabase SQL editor if not already present.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS password_resets (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token       VARCHAR(6) NOT NULL,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Index for fast lookup by user_id
+CREATE INDEX IF NOT EXISTS idx_password_resets_user_id ON password_resets(user_id);
+
+-- RLS
+ALTER TABLE password_resets ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all for anon" ON password_resets FOR ALL USING (true) WITH CHECK (true);
