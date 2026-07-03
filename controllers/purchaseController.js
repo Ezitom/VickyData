@@ -297,19 +297,17 @@ exports.purchaseData = async (req, res) => {
     console.error('Data purchase error:', error.message);
     console.error('Error code:', error.code);
 
-    // If it is a timeout error, do not refund immediately
-    // The purchase may have gone through on PeaceSub's end
-    if (error.code === 'ECONNABORTED' || 
+    // If it is a timeout error, do not refund — purchase may have
+    // gone through on PeaceSub's end. Pin this specific transaction
+    // as 'pending' by its unique reference so admin can reconcile.
+    if (error.code === 'ECONNABORTED' ||
         error.message.includes('timeout')) {
-      
-      // Update transaction to pending instead of failed
+
+      console.warn('Data purchase timeout — leaving transaction pending:', reference);
       await supabase
         .from('transactions')
         .update({ status: 'pending' })
-        .eq('user_id', req.user.id)
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false })
-        .limit(1);
+        .eq('reference', reference);
 
       return res.status(202).json({
         message: 'Your purchase is being processed. ' +
@@ -554,16 +552,17 @@ exports.purchaseAirtime = async (req, res) => {
     console.error('Airtime purchase error:', error.message);
     console.error('Error code:', error.code);
 
-    if (error.code === 'ECONNABORTED' || 
+    // If it is a timeout error, do not refund — purchase may have
+    // gone through on PeaceSub's end. Pin this specific transaction
+    // as 'pending' by its unique reference so admin can reconcile.
+    if (error.code === 'ECONNABORTED' ||
         error.message.includes('timeout')) {
-      
+
+      console.warn('Airtime purchase timeout — leaving transaction pending:', reference);
       await supabase
         .from('transactions')
         .update({ status: 'pending' })
-        .eq('user_id', req.user.id)
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false })
-        .limit(1);
+        .eq('reference', reference);
 
       return res.status(202).json({
         message: 'Your purchase is being processed. ' +
