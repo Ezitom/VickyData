@@ -271,73 +271,61 @@ const initiateFunding = async (req, res) => {
       .single();
 
     const minFunding = setting ? parseFloat(setting.setting_value) : 100;
-
     if (parsedAmount < minFunding) {
       return res.status(400).json({ message: `Minimum funding amount is ${formatAmount(minFunding)}.` });
     }
 
-    const { data: pendingCountData, error: pendingCountError } = await supabase
-      .from('funding_requests')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', req.user.id)
-      .eq('status', 'pending');
+    // Generate a unique reference
+    const reference = 'VD-' + Date.now() + '-' + Math.floor(Math.random() * 1000000);
 
-    if (pendingCountError) {
-      console.error('Pending funding count error:', pendingCountError);
-      return res.status(500).json({ message: 'Could not validate funding request limit.' });
-    }
-
-    if ((pendingCountData || 0) >= 5) {
-      return res.status(429).json({ message: 'You already have too many pending funding requests. Please wait for review.' });
-    }
-
-    let reference = generateReferenceCode();
-    let attempts = 0;
-    while (attempts < 10) {
-      const { data: existing } = await supabase
-        .from('funding_requests')
-        .select('id')
-        .eq('reference_code', reference)
-        .maybeSingle();
-      if (!existing) break;
-      reference = generateReferenceCode();
-      attempts += 1;
-    }
-
-    const { data: inserted, error: insertError } = await supabase
-      .from('funding_requests')
+    // Pre-create the wallet_funding record so the webhook/verify can credit it
+    const { error: insertError } = await supabase
+      .from('wallet_funding')
       .insert({
         user_id: req.user.id,
-        reference_code: reference,
-        amount_claimed: parsedAmount,
-        status: 'pending',
-        proof_note: null
-      })
-      .select('id, reference_code, amount_claimed, status')
-      .single();
+        amount: parsedAmount,
+        paystack_reference: reference,
+        status: 'pending'
+      });
 
-    if (insertError || !inserted) {
-      console.error('Create funding request error:', insertError);
-      return res.status(500).json({ message: 'Failed to create funding request.' });
+    if (insertError) {
+      console.error('Pre-create wallet_funding error:', insertError);
+      return res.status(500).json({ message: 'Could not initialize payment. Please try again.' });
     }
+
+    // Call Paystack to get authorization URL
+    const paystackRes = await axios.post(
+      `${PAYSTACK_BASE}/transaction/initialize`,
+      {
+        email: req.user.email,
+        amount: Math.round(parsedAmount * 100), // kobo
+        reference,
+        callback_url: `${process.env.FRONTEND_URL}/user/dashboard.html`,
+        metadata: { user_id: req.user.id }
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const { authorization_url, access_code } = paystackRes.data.data;
 
     return res.status(200).json({
       success: true,
-      reference_code: inserted.reference_code,
-      amount_claimed: inserted.amount_claimed,
-      status: inserted.status,
-      bank_details: {
-        account_name: process.env.BANK_ACCOUNT_NAME || 'VICKYDATA LIMITED',
-        account_number: process.env.BANK_ACCOUNT_NUMBER || '0000000000',
-        bank_name: process.env.BANK_NAME || 'Access Bank'
-      },
-      instructions: 'Include this reference code in your transfer narration/remark.'
+      authorization_url,
+      access_code,
+      reference
     });
+
   } catch (error) {
-    console.error('Initiate funding error:', error);
-    return res.status(500).json({ message: 'Something went wrong. Please try again.' });
+    console.error('Initiate funding error:', error?.response?.data || error.message);
+    return res.status(500).json({ message: 'Could not initiate payment. Please try again.' });
   }
 };
+
 
 // POST /api/funding-requests
 const createFundingRequest = async (req, res) => {
