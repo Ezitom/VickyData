@@ -391,7 +391,6 @@ const updateSettings = async (req, res) => {
 // GET /api/admin/wallet-balance
 const getProviderWalletBalance = async (req, res) => {
   try {
-    const peaceSub = require('../config/peacesub');
     // Try /balance/ first (primary PeaceSub balance endpoint)
     let balance = 0;
     try {
@@ -414,7 +413,6 @@ const getProviderWalletBalance = async (req, res) => {
 // POST /api/admin/sync-plans
 const syncPlans = async (req, res) => {
   try {
-    const peaceSub = require('../config/peacesub');
 
     const response = await peaceSub.get('/dataplans/');
     // PeaceSub returns an array directly or nested under a key

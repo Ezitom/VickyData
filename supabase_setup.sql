@@ -164,7 +164,7 @@ VALUES (
 );
 
 -- 9. SEED DATA PLANS
--- NOTE: Replace bundle_id values with real IDs from your CheapDataHub dashboard!
+-- NOTE: Replace bundle_id values with real IDs from your PeaceSub dashboard!
 INSERT INTO data_plans
   (network, plan_name, size, validity, bundle_id, cost_price, selling_price, peyflex_network_id, plan_code)
 VALUES

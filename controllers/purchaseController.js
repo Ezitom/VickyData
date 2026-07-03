@@ -76,7 +76,7 @@ exports.getPlansByNetwork = async (req, res) => {
   }
 };
 
-// ─── GET LIVE PLANS FROM CHEAPDATAHUB ─────────────────────────
+// ─── GET LIVE PLANS FROM PEACESUB (via Supabase cache) ──────────
 exports.getLivePlans = async (req, res) => {
   try {
     const { data: plans, error } = await supabase
@@ -180,7 +180,7 @@ exports.purchaseData = async (req, res) => {
       status: 'pending'
     });
 
-    // Deduct wallet BEFORE calling CheapDataHub
+    // Deduct wallet BEFORE calling PeaceSub
     await supabase
       .from('users')
       .update({
@@ -464,7 +464,7 @@ exports.purchaseAirtime = async (req, res) => {
       status: 'pending'
     });
 
-    // Deduct wallet BEFORE calling CheapDataHub
+    // Deduct wallet BEFORE calling PeaceSub
     await supabase
       .from('users')
       .update({
