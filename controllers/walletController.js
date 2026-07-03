@@ -122,15 +122,17 @@ const creditWallet = async (reference) => {
       .eq('id', funding.user_id)
       .single();
 
-    newBalance = parseFloat(currentUser.wallet_balance) + parseFloat(funding.amount);
+    if (currentUser) {
+      newBalance = parseFloat(currentUser.wallet_balance) + parseFloat(funding.amount);
 
-    await supabase
-      .from('users')
-      .update({
-        wallet_balance: newBalance,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', funding.user_id);
+      await supabase
+        .from('users')
+        .update({
+          wallet_balance: newBalance,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', funding.user_id);
+    }
   } else {
     newBalance = updatedUser ? updatedUser.wallet_balance : null;
   }
