@@ -94,8 +94,6 @@ const register = async (req, res) => {
     // Generate JWT
     const token = generateToken(newUser);
 
-    const { sendMail } = require('../config/mailer');
-
     await sendMail(
       email,
       'Welcome to VICKYDATA!',

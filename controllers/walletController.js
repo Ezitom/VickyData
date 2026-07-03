@@ -594,16 +594,13 @@ const verifyFunding = async (req, res) => {
 
     const userId = req.user.id;
     const amount = result.amount;
+    const newBalance = result.newBalance;
 
     const { data: user } = await supabase
       .from('users')
-      .select('full_name, email, wallet_balance')
+      .select('full_name, email')
       .eq('id', userId)
       .single();
-
-    const newBalance = parseFloat(user.wallet_balance) + parseFloat(amount);
-
-    const { sendMail } = require('../config/mailer');
 
     await sendMail(
       process.env.MAIL_USER,
