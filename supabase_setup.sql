@@ -89,8 +89,12 @@ CREATE TABLE IF NOT EXISTS wallet_transactions (
   type VARCHAR(10) NOT NULL CHECK (type IN ('credit', 'debit')),
   amount DECIMAL(12,2) NOT NULL,
   balance_after DECIMAL(12,2) NOT NULL,
+  source VARCHAR(20) DEFAULT 'manual' CHECK (source IN ('manual', 'paystack')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Migrations/Alters (for existing databases)
+ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'manual' CHECK (source IN ('manual', 'paystack'));
 
 CREATE OR REPLACE FUNCTION credit_funding_request_wallet(p_funding_request_id UUID, p_admin_id UUID)
 RETURNS JSON AS $$
@@ -121,8 +125,14 @@ BEGIN
       updated_at = NOW()
   WHERE id = v_wallet.id;
 
-  INSERT INTO wallet_transactions (wallet_id, funding_request_id, type, amount, balance_after, created_at)
-  VALUES (v_wallet.id, v_request.id, 'credit', v_request.amount_claimed, v_new_balance, NOW());
+  INSERT INTO wallet_transactions (wallet_id, funding_request_id, type, amount, balance_after, source, created_at)
+  VALUES (v_wallet.id, v_request.id, 'credit', v_request.amount_claimed, v_new_balance, 'manual', NOW());
+
+  -- Update user's wallet_balance in users table to keep it in sync
+  UPDATE users
+  SET wallet_balance = v_new_balance,
+      updated_at = NOW()
+  WHERE id = v_request.user_id;
 
   UPDATE funding_requests
   SET status = 'confirmed',
@@ -131,6 +141,54 @@ BEGIN
   WHERE id = v_request.id;
 
   RETURN json_build_object('success', true, 'new_balance', v_new_balance, 'wallet_id', v_wallet.id);
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION credit_wallet_atomic(
+  p_user_id UUID,
+  p_amount DECIMAL(12,2),
+  p_paystack_reference VARCHAR(100),
+  p_source VARCHAR(20)
+)
+RETURNS JSON AS $$
+DECLARE
+  v_wallet wallets%ROWTYPE;
+  v_new_balance DECIMAL(12,2);
+  v_wallet_txn_id UUID;
+BEGIN
+  -- 1. Ensure wallet exists for user
+  INSERT INTO wallets (user_id, balance, updated_at)
+  VALUES (p_user_id, 0, NOW())
+  ON CONFLICT (user_id) DO NOTHING;
+
+  -- 2. Select wallet for update
+  SELECT * INTO v_wallet FROM wallets WHERE user_id = p_user_id FOR UPDATE;
+
+  -- 3. Calculate new balance
+  v_new_balance := COALESCE(v_wallet.balance, 0) + p_amount;
+
+  -- 4. Update wallet balance
+  UPDATE wallets
+  SET balance = v_new_balance,
+      updated_at = NOW()
+  WHERE id = v_wallet.id;
+
+  -- 5. Insert wallet transaction
+  INSERT INTO wallet_transactions (wallet_id, funding_request_id, type, amount, balance_after, source, created_at)
+  VALUES (v_wallet.id, NULL, 'credit', p_amount, v_new_balance, p_source, NOW())
+  RETURNING id INTO v_wallet_txn_id;
+
+  -- 6. Update user's wallet_balance in users table to keep it in sync
+  UPDATE users
+  SET wallet_balance = v_new_balance,
+      updated_at = NOW()
+  WHERE id = p_user_id;
+
+  RETURN json_build_object(
+    'success', true,
+    'new_balance', v_new_balance,
+    'wallet_transaction_id', v_wallet_txn_id
+  );
 END;
 $$ LANGUAGE plpgsql;
 

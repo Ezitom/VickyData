@@ -63,6 +63,13 @@ app.get('/', (req, res) => {
   res.status(200).json({ status: 'VICKYDATA API is running' });
 });
 
+// ─── Configuration ────────────────────────────────────────────────────────────
+app.get('/api/config', (req, res) => {
+  res.status(200).json({
+    paystack_live_enabled: process.env.PAYSTACK_LIVE_ENABLED === 'true'
+  });
+});
+
 // ─── Routes ──────────────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
 app.use('/api/wallet', walletRoutes);

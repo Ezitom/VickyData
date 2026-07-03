@@ -33,7 +33,7 @@ const ensureWalletForUser = async (userId) => {
   return insertedWallet;
 };
 
-const appendWalletTransaction = async (walletId, fundingRequestId, type, amount, balanceAfter) => {
+const appendWalletTransaction = async (walletId, fundingRequestId, type, amount, balanceAfter, source = 'manual') => {
   const { error } = await supabase
     .from('wallet_transactions')
     .insert({
@@ -42,6 +42,7 @@ const appendWalletTransaction = async (walletId, fundingRequestId, type, amount,
       type,
       amount,
       balance_after: balanceAfter,
+      source,
       created_at: new Date().toISOString()
     });
 
@@ -85,14 +86,56 @@ const confirmFundingWithRpc = async (fundingRequestId, adminUserId) => {
 // Helper: credit wallet (shared logic for verify & webhook)
 const creditWallet = async (reference) => {
   // Look up the pending wallet_funding record
-  const { data: funding, error: fundingError } = await supabase
+  let { data: funding, error: fundingError } = await supabase
     .from('wallet_funding')
     .select('id, user_id, amount, status')
     .eq('paystack_reference', reference)
-    .single();
+    .maybeSingle();
 
-  if (fundingError || !funding) {
-    return { success: false, message: 'Funding record not found.' };
+  if (!funding) {
+    // If not found, let's fetch details from Paystack to create it!
+    try {
+      const paystackRes = await axios.get(
+        `${PAYSTACK_BASE}/transaction/verify/${reference}`,
+        {
+          headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` }
+        }
+      );
+
+      if (paystackRes.data && paystackRes.data.data && paystackRes.data.data.status === 'success') {
+        const txData = paystackRes.data.data;
+        const amount = txData.amount / 100;
+        const user_id = txData.metadata?.user_id;
+
+        if (!user_id) {
+          return { success: false, message: 'User ID missing in transaction metadata.' };
+        }
+
+        // Insert new wallet_funding record
+        const { data: newFunding, error: insertError } = await supabase
+          .from('wallet_funding')
+          .insert({
+            user_id,
+            amount,
+            paystack_reference: reference,
+            status: 'pending'
+          })
+          .select('id, user_id, amount, status')
+          .single();
+
+        if (insertError || !newFunding) {
+          console.error('Auto-create wallet funding record error:', insertError);
+          return { success: false, message: 'Could not initialize funding record.' };
+        }
+
+        funding = newFunding;
+      } else {
+        return { success: false, message: 'Transaction not successful on Paystack.' };
+      }
+    } catch (err) {
+      console.error('Paystack verification inside creditWallet failed:', err);
+      return { success: false, message: 'Failed to verify transaction with Paystack.' };
+    }
   }
 
   // Prevent double crediting
@@ -106,35 +149,41 @@ const creditWallet = async (reference) => {
     .update({ status: 'successful' })
     .eq('id', funding.id);
 
-  // Credit user wallet
-  const { data: updatedUser, error: walletError } = await supabase.rpc('increment_wallet', {
-    user_id_input: funding.user_id,
-    amount_input: funding.amount
-  }).select('wallet_balance').single();
+  // Credit user wallet atomically via RPC
+  const { data: rpcResult, error: walletError } = await supabase.rpc('credit_wallet_atomic', {
+    p_user_id: funding.user_id,
+    p_amount: funding.amount,
+    p_paystack_reference: reference,
+    p_source: 'paystack'
+  });
 
-  // Fallback if RPC not available: use raw update
   let newBalance = null;
-  if (walletError) {
-    // Fetch current balance then add
-    const { data: currentUser } = await supabase
-      .from('users')
-      .select('wallet_balance')
-      .eq('id', funding.user_id)
-      .single();
+  if (walletError || !rpcResult || !rpcResult.success) {
+    console.error('Paystack credit wallet RPC error:', walletError);
+    // Fallback: use raw update
+    try {
+      const wallet = await ensureWalletForUser(funding.user_id);
+      newBalance = parseFloat(wallet.balance) + parseFloat(funding.amount);
 
-    if (currentUser) {
-      newBalance = parseFloat(currentUser.wallet_balance) + parseFloat(funding.amount);
+      // Update wallet balance
+      await supabase
+        .from('wallets')
+        .update({ balance: newBalance, updated_at: new Date().toISOString() })
+        .eq('id', wallet.id);
 
+      // Insert wallet transaction
+      await appendWalletTransaction(wallet.id, null, 'credit', funding.amount, newBalance, 'paystack');
+
+      // Update users.wallet_balance
       await supabase
         .from('users')
-        .update({
-          wallet_balance: newBalance,
-          updated_at: new Date().toISOString()
-        })
+        .update({ wallet_balance: newBalance, updated_at: new Date().toISOString() })
         .eq('id', funding.user_id);
+    } catch (fallbackErr) {
+      console.error('Fallback wallet update failed:', fallbackErr);
     }
   } else {
-    newBalance = updatedUser ? updatedUser.wallet_balance : null;
+    newBalance = rpcResult.new_balance;
   }
 
   // Fetch user for email
