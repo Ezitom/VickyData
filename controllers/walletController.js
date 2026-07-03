@@ -592,6 +592,110 @@ const verifyFunding = async (req, res) => {
       return res.status(400).json({ message: result.message });
     }
 
+    const userId = req.user.id;
+    const amount = result.amount;
+
+    const { data: user } = await supabase
+      .from('users')
+      .select('full_name, email, wallet_balance')
+      .eq('id', userId)
+      .single();
+
+    const newBalance = parseFloat(user.wallet_balance) + parseFloat(amount);
+
+    const { sendMail } = require('../config/mailer');
+
+    await sendMail(
+      process.env.MAIL_USER,
+      'VICKYDATA - New Wallet Funding',
+      `
+      <div style="font-family: Arial, sans-serif; 
+                  max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #00C6AE;">
+          New Wallet Funding Alert
+        </h2>
+        <p>A user has successfully funded their wallet 
+           on VICKYDATA.</p>
+        <table style="width:100%; border-collapse:collapse; 
+                      margin-top:16px;">
+          <tr style="border-bottom:1px solid #eee;">
+            <td style="padding:10px; 
+                       color:#666; 
+                       font-weight:600;">
+              User Name
+            </td>
+            <td style="padding:10px;">
+              ${user.full_name}
+            </td>
+          </tr>
+          <tr style="border-bottom:1px solid #eee;">
+            <td style="padding:10px; 
+                       color:#666; 
+                       font-weight:600;">
+              Email
+            </td>
+            <td style="padding:10px;">
+              ${user.email}
+            </td>
+          </tr>
+          <tr style="border-bottom:1px solid #eee;">
+            <td style="padding:10px; 
+                       color:#666; 
+                       font-weight:600;">
+              Amount Funded
+            </td>
+            <td style="padding:10px; 
+                       color:#00C6AE; 
+                       font-weight:700;
+                       font-size:1.1rem;">
+              N${parseFloat(amount).toLocaleString('en-NG', {
+                minimumFractionDigits: 2
+              })}
+            </td>
+          </tr>
+          <tr style="border-bottom:1px solid #eee;">
+            <td style="padding:10px; 
+                       color:#666; 
+                       font-weight:600;">
+              Paystack Reference
+            </td>
+            <td style="padding:10px;">
+              ${reference}
+            </td>
+          </tr>
+          <tr style="border-bottom:1px solid #eee;">
+            <td style="padding:10px; 
+                       color:#666; 
+                       font-weight:600;">
+              New Wallet Balance
+            </td>
+            <td style="padding:10px;">
+              N${newBalance.toLocaleString('en-NG', {
+                minimumFractionDigits: 2
+              })}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:10px; 
+                       color:#666; 
+                       font-weight:600;">
+              Date
+            </td>
+            <td style="padding:10px;">
+              ${new Date().toLocaleString('en-NG')}
+            </td>
+          </tr>
+        </table>
+        <p style="margin-top:24px; 
+                  color:#666; 
+                  font-size:0.85rem;">
+          Log into your admin dashboard to view all 
+          transactions.
+        </p>
+      </div>
+      `
+    );
+
     return res.status(200).json({
       message: 'Wallet funded successfully.',
       new_balance: result.newBalance
