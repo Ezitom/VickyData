@@ -261,7 +261,7 @@ exports.purchaseData = async (req, res) => {
       const newBalance = parseFloat(user.wallet_balance) -
         parseFloat(plan.selling_price);
 
-      await sendMail(
+      sendMail(
         user.email,
         'Data Purchase Successful - VICKYDATA',
         `
@@ -351,7 +351,7 @@ exports.purchaseData = async (req, res) => {
 
       if (currentUser) {
         const { sendMail } = require('../config/mailer');
-        await sendMail(
+        sendMail(
           currentUser.email,
           'Data Purchase Failed - VICKYDATA',
           `
@@ -520,7 +520,7 @@ exports.purchaseAirtime = async (req, res) => {
       const newBalance = parseFloat(user.wallet_balance) -
         parseFloat(amount);
 
-      await sendMail(
+      sendMail(
         user.email,
         'Airtime Purchase Successful - VICKYDATA',
         `
@@ -597,7 +597,7 @@ exports.purchaseAirtime = async (req, res) => {
           .eq('status', 'pending');
 
         const { sendMail } = require('../config/mailer');
-        await sendMail(
+        sendMail(
           currentUser.email,
           'Airtime Purchase Failed - VICKYDATA',
           `

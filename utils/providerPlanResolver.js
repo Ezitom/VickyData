@@ -60,7 +60,7 @@ const findProviderPlanMatch = (localPlan, providerPlans = []) => {
   return null;
 };
 
-const resolveProviderBundleId = async (localPlan, cheapDataHub) => {
+const resolveProviderBundleId = async (localPlan, peaceSub) => {
   if (!localPlan) return null;
 
   const currentBundleId = localPlan.bundle_id;
@@ -69,8 +69,10 @@ const resolveProviderBundleId = async (localPlan, cheapDataHub) => {
   }
 
   try {
-    const response = await cheapDataHub.get('/data/plans/');
-    const providerPlans = response?.data?.plans || response?.data?.data || [];
+    const response = await peaceSub.get('/dataplans/');
+    const providerPlans = Array.isArray(response?.data)
+      ? response.data
+      : (response?.data?.plans || response?.data?.data || []);
     const match = findProviderPlanMatch(localPlan, providerPlans);
 
     if (match?.id || match?.bundle_id || match?.plan_id) {

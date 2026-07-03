@@ -464,8 +464,7 @@ const syncPlans = async (req, res) => {
     const changedPlans = syncResults.filter(p => p.changed);
     const unchangedPlans = syncResults.filter(p => !p.changed);
 
-    const { sendMail } = require('../config/mailer');
-    await sendMail(
+    sendMail(
       process.env.MAIL_USER,
       'VICKYDATA - Plan Sync Complete',
       `
