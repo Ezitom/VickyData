@@ -392,15 +392,21 @@ const updateSettings = async (req, res) => {
 const getProviderWalletBalance = async (req, res) => {
   try {
     const peaceSub = require('../config/peacesub');
-    const response = await peaceSub.get('/user/');
-    res.json({
-      balance: response.data.wallet_balance || 
-               response.data.balance || 0
-    });
+    // Try /balance/ first (primary PeaceSub balance endpoint)
+    let balance = 0;
+    try {
+      const balRes = await peaceSub.get('/balance/');
+      balance = balRes.data?.balance ?? balRes.data?.wallet_balance ?? 0;
+    } catch {
+      // Fallback: try /user/ endpoint
+      const userRes = await peaceSub.get('/user/');
+      balance = userRes.data?.wallet_balance ?? userRes.data?.balance ?? 0;
+    }
+    res.json({ balance });
   } catch (error) {
     console.error('Provider wallet balance error:', error);
     res.status(500).json({
-      message: 'Could not fetch provider wallet balance.'
+      message: 'Could not fetch provider wallet balance. Check your PEACESUB_API_KEY and base URL.'
     });
   }
 };
@@ -411,7 +417,10 @@ const syncPlans = async (req, res) => {
     const peaceSub = require('../config/peacesub');
 
     const response = await peaceSub.get('/dataplans/');
-    const psPlans = response.data || [];
+    // PeaceSub returns an array directly or nested under a key
+    const psPlans = Array.isArray(response.data)
+      ? response.data
+      : (response.data?.data || response.data?.plans || []);
 
     const syncResults = [];
     const errors = [];
@@ -427,8 +436,9 @@ const syncPlans = async (req, res) => {
         if (existingPlan) {
           const oldCostPrice = 
             parseFloat(existingPlan.cost_price);
+          // PeaceSub plan price field may be plan_amount or amount
           const newCostPrice = 
-            parseFloat(psPlan.plan_amount);
+            parseFloat(psPlan.plan_amount ?? psPlan.amount ?? psPlan.price ?? 0);
 
           if (oldCostPrice !== newCostPrice) {
             await supabase
