@@ -220,7 +220,7 @@ exports.purchaseData = async (req, res) => {
     console.log('Calling PeaceSub data API with:', {
       network: providerNetworkId,
       mobile_number: phone_number,
-      plan: plan.bundle_id,
+      plan: resolvedBundleId,
       Ported_number: true
     });
 
@@ -229,7 +229,7 @@ exports.purchaseData = async (req, res) => {
       {
         network: providerNetworkId,
         mobile_number: phone_number,
-        plan: plan.bundle_id,
+        plan: resolvedBundleId,
         Ported_number: true
       }
     );
@@ -350,7 +350,6 @@ exports.purchaseData = async (req, res) => {
         .eq('status', 'pending');
 
       if (currentUser) {
-        const { sendMail } = require('../config/mailer');
         sendMail(
           currentUser.email,
           'Data Purchase Failed - VICKYDATA',
@@ -596,7 +595,6 @@ exports.purchaseAirtime = async (req, res) => {
           .eq('user_id', req.user.id)
           .eq('status', 'pending');
 
-        const { sendMail } = require('../config/mailer');
         sendMail(
           currentUser.email,
           'Airtime Purchase Failed - VICKYDATA',
