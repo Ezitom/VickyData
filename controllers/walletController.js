@@ -577,7 +577,7 @@ const verifyFunding = async (req, res) => {
       }
     );
 
-    const { status, amount } = paystackRes.data.data;
+    const { status } = paystackRes.data.data;
 
     if (status !== 'success') {
       return res.status(400).json({ message: 'Payment not successful.' });
