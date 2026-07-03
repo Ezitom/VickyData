@@ -94,7 +94,8 @@ const register = async (req, res) => {
     // Generate JWT
     const token = generateToken(newUser);
 
-    await sendMail(
+    // Send welcome email (non-blocking — do not await so SMTP issues don't affect registration)
+    sendMail(
       email,
       'Welcome to VICKYDATA!',
       `
