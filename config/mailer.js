@@ -1,36 +1,32 @@
 const nodemailer = require('nodemailer');
-require('dotenv').config();
 
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
-  port: 465,
-  secure: true,
+  port: 587,
+  secure: false,
   auth: {
     user: process.env.MAIL_USER,
     pass: process.env.MAIL_PASS
-  }
+  },
+  tls: {
+    rejectUnauthorized: false
+  },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 10000
 });
 
-/**
- * Sends an email using Gmail SMTP
- * @param {string} to - Recipient email address
- * @param {string} subject - Email subject
- * @param {string} html - HTML email body
- */
 const sendMail = async (to, subject, html) => {
-  const mailOptions = {
-    from: process.env.MAIL_FROM,
-    to,
-    subject,
-    html
-  };
-
   try {
-    await transporter.sendMail(mailOptions);
-    console.log(`Email sent to ${to}: ${subject}`);
+    await transporter.sendMail({
+      from: process.env.MAIL_FROM,
+      to,
+      subject,
+      html
+    });
+    console.log('Email sent successfully to:', to);
   } catch (error) {
-    console.error(`Failed to send email to ${to}:`, error.message);
-    // Do not throw - email failures should not break transaction flows
+    console.error('Failed to send email to', to, ':', error.message);
   }
 };
 
