@@ -11,6 +11,52 @@ const formatAmount = (amount) => {
   })}`;
 };
 
+const updateUserBalance = async (userId, amount) => {
+  let retries = 5;
+  while (retries > 0) {
+    const { data: user, error: fetchErr } = await supabase
+      .from('users')
+      .select('wallet_balance, updated_at')
+      .eq('id', userId)
+      .single();
+
+    if (fetchErr || !user) {
+      throw new Error(fetchErr ? fetchErr.message : 'User not found');
+    }
+
+    const currentBalance = parseFloat(user.wallet_balance || 0);
+    const newBalance = currentBalance + parseFloat(amount);
+
+    if (newBalance < 0) {
+      throw new Error('Insufficient wallet balance.');
+    }
+
+    const { data: updatedRows, error: updateErr } = await supabase
+      .from('users')
+      .update({
+        wallet_balance: newBalance,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', userId)
+      .eq('updated_at', user.updated_at)
+      .select('wallet_balance');
+
+    if (updateErr) {
+      retries--;
+      await new Promise(resolve => setTimeout(resolve, 50 + Math.random() * 100));
+      continue;
+    }
+
+    if (updatedRows && updatedRows.length > 0) {
+      return parseFloat(updatedRows[0].wallet_balance);
+    } else {
+      retries--;
+      await new Promise(resolve => setTimeout(resolve, 50 + Math.random() * 100));
+    }
+  }
+  throw new Error('Failed to update wallet balance due to concurrent updates.');
+};
+
 const creditWallet = async (reference) => {
   try {
     // Find the pending wallet_funding record
@@ -92,10 +138,10 @@ const creditWallet = async (reference) => {
       };
     }
 
-    // Fetch current user wallet balance
+    // Fetch user details for email
     const { data: user, error: userError } = await supabase
       .from('users')
-      .select('wallet_balance, full_name, email')
+      .select('full_name, email')
       .eq('id', funding.user_id)
       .single();
 
@@ -106,26 +152,15 @@ const creditWallet = async (reference) => {
       };
     }
 
-    const currentBalance = parseFloat(
-      user.wallet_balance || 0
-    );
     const fundingAmount = parseFloat(funding.amount);
-    const newBalance = currentBalance + fundingAmount;
-
-    // Update wallet balance on users table directly
-    const { error: walletError } = await supabase
-      .from('users')
-      .update({ 
-        wallet_balance: newBalance,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', funding.user_id);
-
-    if (walletError) {
-      console.error('Wallet update error:', walletError);
+    let newBalance;
+    try {
+      newBalance = await updateUserBalance(funding.user_id, fundingAmount);
+    } catch (updateErr) {
+      console.error('Wallet update error:', updateErr);
       return { 
         success: false, 
-        message: 'Could not update wallet balance.' 
+        message: updateErr.message || 'Could not update wallet balance.' 
       };
     }
 

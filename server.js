@@ -12,11 +12,6 @@ const purchaseRoutes = require('./routes/purchaseRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const authMiddleware = require('./middleware/authMiddleware');
-const {
-  createFundingRequest,
-  getMyFundingRequests,
-  markFundingRequestAsSent
-} = require('./controllers/walletController');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -73,9 +68,7 @@ app.get('/api/config', (req, res) => {
 // ─── Routes ──────────────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
 app.use('/api/wallet', walletRoutes);
-app.post('/api/funding-requests', authMiddleware, createFundingRequest);
-app.get('/api/funding-requests/mine', authMiddleware, getMyFundingRequests);
-app.post('/api/funding-requests/:id/mark-sent', authMiddleware, markFundingRequestAsSent);
+
 app.use('/api/purchase', purchaseRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/admin', adminRoutes);
