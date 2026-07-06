@@ -16,7 +16,8 @@ const {
   getSettings,
   updateSettings,
   getProviderWalletBalance,
-  syncPlans
+  syncPlans,
+  refundTransaction
 } = require('../controllers/adminController');
 
 // Apply both middlewares to all admin routes
@@ -37,5 +38,6 @@ router.get('/settings', getSettings);
 router.patch('/settings', updateSettings);
 router.put('/settings', updateSettings);
 router.get('/wallet-balance', getProviderWalletBalance);
+router.post('/transactions/:reference/refund', refundTransaction);
 
 module.exports = router;

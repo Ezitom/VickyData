@@ -528,6 +528,106 @@ const syncPlans = async (req, res) => {
     });
   }
 };
+// POST /api/admin/transactions/:reference/refund
+const refundTransaction = async (req, res) => {
+  try {
+    const { reference } = req.params;
+
+    // Fetch the transaction
+    const { data: tx, error: txError } = await supabase
+      .from('transactions')
+      .select(`
+        *,
+        users (id, full_name, email, wallet_balance)
+      `)
+      .eq('reference', reference)
+      .single();
+
+    if (txError || !tx) {
+      return res.status(404).json({ message: 'Transaction not found.' });
+    }
+
+    if (tx.status !== 'failed') {
+      return res.status(400).json({
+        message: `Cannot refund a transaction with status "${tx.status}". Only failed transactions can be refunded.`
+      });
+    }
+
+    const user = tx.users;
+    if (!user) {
+      return res.status(404).json({ message: 'User associated with this transaction not found.' });
+    }
+
+    const refundAmount = parseFloat(tx.amount);
+
+    // Get fresh wallet balance to avoid race conditions
+    const { data: freshUser, error: balanceError } = await supabase
+      .from('users')
+      .select('wallet_balance')
+      .eq('id', user.id)
+      .single();
+
+    if (balanceError || !freshUser) {
+      return res.status(500).json({ message: 'Could not fetch user wallet balance.' });
+    }
+
+    const newBalance = parseFloat(freshUser.wallet_balance) + refundAmount;
+
+    // Credit wallet
+    const { error: walletError } = await supabase
+      .from('users')
+      .update({ wallet_balance: newBalance, updated_at: new Date().toISOString() })
+      .eq('id', user.id);
+
+    if (walletError) {
+      console.error('Refund wallet update error:', walletError);
+      return res.status(500).json({ message: 'Failed to update wallet balance.' });
+    }
+
+    // Mark transaction as refunded
+    await supabase
+      .from('transactions')
+      .update({ status: 'refunded', updated_at: new Date().toISOString() })
+      .eq('reference', reference);
+
+    // Email the user
+    try {
+      sendMail(
+        user.email,
+        'Wallet Refunded - VICKYDATA',
+        `
+        <h2>Wallet Refunded</h2>
+        <p>Hi ${user.full_name},</p>
+        <p>Your wallet has been refunded for a failed transaction.</p>
+        <table cellpadding="6">
+          <tr><td><strong>Reference:</strong></td><td>${reference}</td></tr>
+          <tr><td><strong>Amount Refunded:</strong></td><td>N${refundAmount.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</td></tr>
+          <tr><td><strong>New Balance:</strong></td><td>N${newBalance.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</td></tr>
+        </table>
+        <p>Thank you for using VICKYDATA. We apologize for the inconvenience.</p>
+        `
+      );
+    } catch (mailErr) {
+      console.error('Refund email failed:', mailErr.message);
+    }
+
+    console.log(
+      `Admin refunded transaction ${reference} for user ${user.email}. ` +
+      `Amount: ${refundAmount}, New Balance: ${newBalance}`
+    );
+
+    return res.status(200).json({
+      message: `Wallet refunded successfully. N${refundAmount.toLocaleString()} has been credited to ${user.full_name}.`,
+      new_balance: newBalance,
+      reference
+    });
+
+  } catch (error) {
+    console.error('Admin refund transaction error:', error);
+    return res.status(500).json({ message: 'Something went wrong. Please try again.' });
+  }
+};
+
 
 module.exports = {
   getOverview,
@@ -543,5 +643,6 @@ module.exports = {
   getSettings,
   updateSettings,
   getProviderWalletBalance,
-  syncPlans
+  syncPlans,
+  refundTransaction
 };
