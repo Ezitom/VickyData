@@ -104,6 +104,10 @@ exports.getLivePlans = async (req, res) => {
 
 // ─── PURCHASE DATA ────────────────────────────────────────────
 exports.purchaseData = async (req, res) => {
+  let reference = null;
+  let plan = null;
+  let user = null;
+
   try {
     const { plan_id, phone_number } = req.body;
 
@@ -136,27 +140,29 @@ exports.purchaseData = async (req, res) => {
     }
 
     // Fetch the plan from Supabase
-    const { data: plan, error: planError } = await supabase
+    const { data: planData, error: planError } = await supabase
       .from('data_plans')
       .select('*')
       .eq('id', plan_id)
       .eq('is_active', true)
       .single();
 
-    if (planError || !plan) {
+    if (planError || !planData) {
       return res.status(404).json({ message: 'Plan not found.' });
     }
+    plan = planData;
 
     // Fetch user wallet balance
-    const { data: user, error: userError } = await supabase
+    const { data: userData, error: userError } = await supabase
       .from('users')
       .select('wallet_balance, full_name, email')
       .eq('id', req.user.id)
       .single();
 
-    if (userError || !user) {
+    if (userError || !userData) {
       return res.status(404).json({ message: 'User not found.' });
     }
+    user = userData;
 
     // Check balance
     if (parseFloat(user.wallet_balance) < parseFloat(plan.selling_price)) {
@@ -166,7 +172,7 @@ exports.purchaseData = async (req, res) => {
     }
 
     // Generate reference
-    const reference = generateRef('VD-DATA');
+    reference = generateRef('VD-DATA');
 
     // Insert pending transaction
     await supabase.from('transactions').insert({
@@ -297,82 +303,131 @@ exports.purchaseData = async (req, res) => {
     console.error('Data purchase error:', error.message);
     console.error('Error code:', error.code);
 
-    // If it is a timeout error, do not refund — purchase may have
-    // gone through on PeaceSub's end. Pin this specific transaction
-    // as 'pending' by its unique reference so admin can reconcile.
+    // Handle timeout specifically
     if (error.code === 'ECONNABORTED' ||
         error.message.includes('timeout')) {
 
-      console.warn('Data purchase timeout — leaving transaction pending:', reference);
-      await supabase
-        .from('transactions')
-        .update({ status: 'pending' })
-        .eq('reference', reference);
+      console.warn('Data purchase timeout for reference:', reference);
 
-      return res.status(202).json({
-        message: 'Your purchase is being processed. ' +
-                 'Check your transaction history in a few ' +
-                 'minutes to confirm delivery.',
-        status: 'processing'
+      // Refund wallet immediately on timeout
+      try {
+        if (reference && user) {
+          // Get fresh user balance
+          const { data: freshUser } = await supabase
+            .from('users')
+            .select('wallet_balance')
+            .eq('id', req.user.id)
+            .single();
+
+          if (freshUser && plan) {
+            const refundedBalance =
+              parseFloat(freshUser.wallet_balance) +
+              parseFloat(plan.selling_price);
+
+            // Refund wallet
+            await supabase
+              .from('users')
+              .update({ wallet_balance: refundedBalance })
+              .eq('id', req.user.id);
+
+            // Mark transaction as failed
+            await supabase
+              .from('transactions')
+              .update({ status: 'failed' })
+              .eq('reference', reference);
+
+            console.log('Wallet refunded for timeout:', reference);
+
+            return res.status(500).json({
+              message: 'Purchase timed out. ' +
+                       'Your wallet has been refunded. ' +
+                       'Please try again.',
+              new_balance: refundedBalance
+            });
+          }
+        }
+      } catch (refundError) {
+        console.error('Refund on timeout failed:', refundError.message);
+      }
+
+      // If refund failed or no reference
+      return res.status(500).json({
+        message: 'Purchase timed out. ' +
+                 'If your wallet was deducted it will ' +
+                 'be refunded within 5 minutes. ' +
+                 'Please contact support if not resolved.',
       });
     }
 
-    // For all other errors, refund the wallet
+    // Handle all other errors with refund
     try {
-      const { data: currentUser } = await supabase
-        .from('users')
-        .select('wallet_balance, full_name, email')
-        .eq('id', req.user.id)
-        .single();
-
-      const { data: plan } = await supabase
-        .from('data_plans')
-        .select('selling_price')
-        .eq('id', req.body.plan_id)
-        .single();
-
-      if (currentUser && plan) {
-        await supabase
+      if (reference && user) {
+        const { data: freshUser } = await supabase
           .from('users')
-          .update({
-            wallet_balance: parseFloat(currentUser.wallet_balance) +
-              parseFloat(plan.selling_price)
-          })
-          .eq('id', req.user.id);
-      }
+          .select('wallet_balance')
+          .eq('id', req.user.id)
+          .single();
 
-      await supabase
-        .from('transactions')
-        .update({ status: 'failed' })
-        .eq('user_id', req.user.id)
-        .eq('status', 'pending');
+        if (freshUser && plan) {
+          const refundedBalance =
+            parseFloat(freshUser.wallet_balance) +
+            parseFloat(plan.selling_price);
 
-      if (currentUser) {
-        sendMail(
-          currentUser.email,
-          'Data Purchase Failed - VICKYDATA',
-          `
-          <h2>Data Purchase Failed</h2>
-          <p>Hi ${currentUser.full_name},</p>
-          <p>Your data purchase could not be completed 
-             and your wallet has been refunded.</p>
-          <p>If you keep experiencing this issue, 
-             please contact support.</p>
-          `
-        );
+          await supabase
+            .from('users')
+            .update({ wallet_balance: refundedBalance })
+            .eq('id', req.user.id);
+
+          await supabase
+            .from('transactions')
+            .update({ status: 'failed' })
+            .eq('reference', reference);
+
+          // Send failure email
+          const { data: userData } = await supabase
+            .from('users')
+            .select('full_name, email')
+            .eq('id', req.user.id)
+            .single();
+
+          if (userData) {
+            sendMail(
+              userData.email,
+              'Data Purchase Failed - VICKYDATA',
+              `
+              <h2>Data Purchase Failed</h2>
+              <p>Hi ${userData.full_name},</p>
+              <p>Your data purchase could not be completed
+                 and your wallet has been refunded.</p>
+              <p>Reference: ${reference}</p>
+              `
+            );
+          }
+
+          return res.status(500).json({
+            message: 'Data purchase failed. ' +
+                     'Your wallet has been refunded.',
+            new_balance: refundedBalance
+          });
+        }
       }
     } catch (refundError) {
-      console.error('Refund error:', refundError);
+      console.error('Refund error:', refundError.message);
     }
 
-    res.status(500).json({
-      message: 'Data purchase failed. Your wallet has been refunded.'
+    return res.status(500).json({
+      message: 'Data purchase failed. ' +
+               'Please contact support if wallet ' +
+               'was deducted.',
     });
   }
 };
 
 // ─── PURCHASE AIRTIME ─────────────────────────────────────────
 exports.purchaseAirtime = async (req, res) => {
+  let reference = null;
+  let user = null;
+
   try {
     const { network, phone_number, amount } = req.body;
 
@@ -412,15 +467,16 @@ exports.purchaseAirtime = async (req, res) => {
     }
 
     // Fetch user wallet balance
-    const { data: user, error: userError } = await supabase
+    const { data: userData, error: userError } = await supabase
       .from('users')
       .select('wallet_balance, full_name, email')
       .eq('id', req.user.id)
       .single();
 
-    if (userError || !user) {
+    if (userError || !userData) {
       return res.status(404).json({ message: 'User not found.' });
     }
+    user = userData;
 
     // Check balance
     if (parseFloat(user.wallet_balance) < parseFloat(amount)) {
@@ -430,7 +486,7 @@ exports.purchaseAirtime = async (req, res) => {
     }
 
     // Generate reference
-    const reference = generateRef('VD-AIR');
+    reference = generateRef('VD-AIR');
 
     const networkMap = {
       'mtn': 1,
@@ -552,65 +608,94 @@ exports.purchaseAirtime = async (req, res) => {
     console.error('Airtime purchase error:', error.message);
     console.error('Error code:', error.code);
 
-    // If it is a timeout error, do not refund — purchase may have
-    // gone through on PeaceSub's end. Pin this specific transaction
-    // as 'pending' by its unique reference so admin can reconcile.
     if (error.code === 'ECONNABORTED' ||
         error.message.includes('timeout')) {
 
-      console.warn('Airtime purchase timeout — leaving transaction pending:', reference);
-      await supabase
-        .from('transactions')
-        .update({ status: 'pending' })
-        .eq('reference', reference);
+      console.warn('Airtime purchase timeout for reference:', reference);
 
-      return res.status(202).json({
-        message: 'Your purchase is being processed. ' +
-                 'Check your transaction history in a few ' +
-                 'minutes to confirm delivery.',
-        status: 'processing'
+      try {
+        if (reference && user) {
+          const { data: freshUser } = await supabase
+            .from('users')
+            .select('wallet_balance')
+            .eq('id', req.user.id)
+            .single();
+
+          if (freshUser) {
+            const refundedBalance =
+              parseFloat(freshUser.wallet_balance) +
+              parseFloat(req.body.amount);
+
+            await supabase
+              .from('users')
+              .update({ wallet_balance: refundedBalance })
+              .eq('id', req.user.id);
+
+            await supabase
+              .from('transactions')
+              .update({ status: 'failed' })
+              .eq('reference', reference);
+
+            console.log('Airtime wallet refunded:', reference);
+
+            return res.status(500).json({
+              message: 'Purchase timed out. ' +
+                       'Your wallet has been refunded. ' +
+                       'Please try again.',
+              new_balance: refundedBalance
+            });
+          }
+        }
+      } catch (refundError) {
+        console.error('Airtime refund on timeout failed:', refundError.message);
+      }
+
+      return res.status(500).json({
+        message: 'Purchase timed out. ' +
+                 'If your wallet was deducted it will ' +
+                 'be refunded within 5 minutes. ' +
+                 'Please contact support if not resolved.',
       });
     }
 
     try {
-      const { data: currentUser } = await supabase
-        .from('users')
-        .select('wallet_balance, full_name, email')
-        .eq('id', req.user.id)
-        .single();
-
-      if (currentUser) {
-        await supabase
+      if (reference && user) {
+        const { data: freshUser } = await supabase
           .from('users')
-          .update({
-            wallet_balance: parseFloat(currentUser.wallet_balance) +
-              parseFloat(req.body.amount)
-          })
-          .eq('id', req.user.id);
+          .select('wallet_balance')
+          .eq('id', req.user.id)
+          .single();
 
-        await supabase
-          .from('transactions')
-          .update({ status: 'failed' })
-          .eq('user_id', req.user.id)
-          .eq('status', 'pending');
+        if (freshUser) {
+          const refundedBalance =
+            parseFloat(freshUser.wallet_balance) +
+            parseFloat(req.body.amount);
 
-        sendMail(
-          currentUser.email,
-          'Airtime Purchase Failed - VICKYDATA',
-          `
-          <h2>Airtime Purchase Failed</h2>
-          <p>Hi ${currentUser.full_name},</p>
-          <p>Your airtime purchase could not be completed 
-             and your wallet has been refunded.</p>
-          `
-        );
+          await supabase
+            .from('users')
+            .update({ wallet_balance: refundedBalance })
+            .eq('id', req.user.id);
+
+          await supabase
+            .from('transactions')
+            .update({ status: 'failed' })
+            .eq('reference', reference);
+
+          return res.status(500).json({
+            message: 'Airtime purchase failed. ' +
+                     'Your wallet has been refunded.',
+            new_balance: refundedBalance
+          });
+        }
       }
     } catch (refundError) {
-      console.error('Refund error:', refundError);
+      console.error('Airtime refund error:', refundError.message);
     }
 
-    res.status(500).json({
-      message: 'Airtime purchase failed. Your wallet has been refunded.'
+    return res.status(500).json({
+      message: 'Airtime purchase failed. ' +
+               'Please contact support if wallet ' +
+               'was deducted.',
     });
   }
 };
