@@ -1,6 +1,7 @@
 const supabase = require('../config/supabase');
 const peaceSub = require('../config/peacesub');
 const { sendMail } = require('../config/mailer');
+const { updateUserBalance } = require('./walletController');
 
 
 // Helper: format currency
@@ -472,42 +473,46 @@ const syncPlans = async (req, res) => {
     const changedPlans = syncResults.filter(p => p.changed);
     const unchangedPlans = syncResults.filter(p => !p.changed);
 
-    sendMail(
-      process.env.MAIL_USER,
-      'VICKYDATA - Plan Sync Complete',
-      `
-      <h2>Plan Sync Results</h2>
-      <p><strong>Total plans checked:</strong> 
-        ${syncResults.length}</p>
-      <p><strong>Plans with price changes:</strong> 
-        ${changedPlans.length}</p>
-      <p><strong>Unchanged plans:</strong> 
-        ${unchangedPlans.length}</p>
+    try {
+      sendMail(
+        process.env.MAIL_USER,
+        'VICKYDATA - Plan Sync Complete',
+        `
+        <h2>Plan Sync Results</h2>
+        <p><strong>Total plans checked:</strong> 
+          ${syncResults.length}</p>
+        <p><strong>Plans with price changes:</strong> 
+          ${changedPlans.length}</p>
+        <p><strong>Unchanged plans:</strong> 
+          ${unchangedPlans.length}</p>
 
-      ${changedPlans.length > 0 ? `
-      <h3>Changed Plans:</h3>
-      <table border="1" cellpadding="8">
-        <tr>
-          <th>Network</th>
-          <th>Plan</th>
-          <th>Old Cost</th>
-          <th>New Cost</th>
-        </tr>
-        ${changedPlans.map(p => `
+        ${changedPlans.length > 0 ? `
+        <h3>Changed Plans:</h3>
+        <table border="1" cellpadding="8">
           <tr>
-            <td>${p.network}</td>
-            <td>${p.plan}</td>
-            <td>N${p.old_cost}</td>
-            <td>N${p.new_cost}</td>
+            <th>Network</th>
+            <th>Plan</th>
+            <th>Old Cost</th>
+            <th>New Cost</th>
           </tr>
-        `).join('')}
-      </table>
-      ` : '<p>No price changes found.</p>'}
+          ${changedPlans.map(p => `
+            <tr>
+              <td>${p.network}</td>
+              <td>${p.plan}</td>
+              <td>N${p.old_cost}</td>
+              <td>N${p.new_cost}</td>
+            </tr>
+          `).join('')}
+        </table>
+        ` : '<p>No price changes found.</p>'}
 
-      <p>Log into your admin dashboard to review and 
-         adjust selling prices if needed.</p>
-      `
-    );
+        <p>Log into your admin dashboard to review and 
+           adjust selling prices if needed.</p>
+        `
+      );
+    } catch (mailErr) {
+      console.error('Sync complete email failed:', mailErr.message);
+    }
 
     res.json({
       message: 'Plans synced successfully',
@@ -560,34 +565,26 @@ const refundTransaction = async (req, res) => {
 
     const refundAmount = parseFloat(tx.amount);
 
-    // Get fresh wallet balance to avoid race conditions
-    const { data: freshUser, error: balanceError } = await supabase
-      .from('users')
-      .select('wallet_balance')
-      .eq('id', user.id)
-      .single();
-
-    if (balanceError || !freshUser) {
-      return res.status(500).json({ message: 'Could not fetch user wallet balance.' });
+    // Credit wallet atomically
+    let balanceResult;
+    try {
+      balanceResult = await updateUserBalance(user.id, refundAmount);
+    } catch (updateErr) {
+      console.error('Refund wallet update error:', updateErr);
+      return res.status(500).json({ message: updateErr.message || 'Failed to update wallet balance.' });
     }
 
-    const newBalance = parseFloat(freshUser.wallet_balance) + refundAmount;
-
-    // Credit wallet
-    const { error: walletError } = await supabase
-      .from('users')
-      .update({ wallet_balance: newBalance, updated_at: new Date().toISOString() })
-      .eq('id', user.id);
-
-    if (walletError) {
-      console.error('Refund wallet update error:', walletError);
-      return res.status(500).json({ message: 'Failed to update wallet balance.' });
-    }
+    const newBalance = balanceResult.balanceAfter;
 
     // Mark transaction as refunded
     await supabase
       .from('transactions')
-      .update({ status: 'refunded', updated_at: new Date().toISOString() })
+      .update({
+        status: 'refunded',
+        balance_before: balanceResult.balanceBefore,
+        balance_after: balanceResult.balanceAfter,
+        updated_at: new Date().toISOString()
+      })
       .eq('reference', reference);
 
     // Email the user

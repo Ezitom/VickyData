@@ -2,6 +2,7 @@ const supabase = require('../config/supabase');
 const peaceSub = require('../config/peacesub');
 const { sendMail } = require('../config/mailer');
 const { resolveProviderBundleId } = require('../utils/providerPlanResolver');
+const { updateUserBalance } = require('./walletController');
 
 const generateRef = (prefix) => {
   const timestamp = Date.now();
@@ -175,6 +176,7 @@ exports.purchaseData = async (req, res) => {
     reference = generateRef('VD-DATA');
 
     // Insert pending transaction
+    // Insert pending transaction
     await supabase.from('transactions').insert({
       user_id: req.user.id,
       type: 'data',
@@ -186,14 +188,29 @@ exports.purchaseData = async (req, res) => {
       status: 'pending'
     });
 
-    // Deduct wallet BEFORE calling PeaceSub
+    // Deduct wallet BEFORE calling PeaceSub using atomic updateUserBalance helper
+    let balanceResult;
+    try {
+      balanceResult = await updateUserBalance(req.user.id, -parseFloat(plan.selling_price));
+    } catch (updateErr) {
+      await supabase
+        .from('transactions')
+        .update({ status: 'failed' })
+        .eq('reference', reference);
+
+      return res.status(400).json({
+        message: updateErr.message || 'Insufficient wallet balance.'
+      });
+    }
+
+    // Update transactions with balance_before and balance_after
     await supabase
-      .from('users')
+      .from('transactions')
       .update({
-        wallet_balance: parseFloat(user.wallet_balance) -
-          parseFloat(plan.selling_price)
+        balance_before: balanceResult.balanceBefore,
+        balance_after: balanceResult.balanceAfter
       })
-      .eq('id', req.user.id);
+      .eq('reference', reference);
 
     // ── CALL PEACESUB DATA API ──────────────────────────
     let resolvedBundleId = plan.bundle_id;
@@ -264,29 +281,32 @@ exports.purchaseData = async (req, res) => {
         })
         .eq('reference', reference);
 
-      const newBalance = parseFloat(user.wallet_balance) -
-        parseFloat(plan.selling_price);
+      const newBalance = balanceResult.balanceAfter;
 
-      sendMail(
-        user.email,
-        'Data Purchase Successful - VICKYDATA',
-        `
-        <h2>Data Purchase Successful</h2>
-        <p>Hi ${user.full_name},</p>
-        <p>Your data purchase was successful. Details:</p>
-        <ul>
-          <li><strong>Plan:</strong> ${plan.plan_name}</li>
-          <li><strong>Network:</strong> ${plan.network}</li>
-          <li><strong>Phone:</strong> ${phone_number}</li>
-          <li><strong>Amount Deducted:</strong>
-            ${formatNaira(plan.selling_price)}</li>
-          <li><strong>New Balance:</strong>
-            ${formatNaira(newBalance)}</li>
-          <li><strong>Reference:</strong> ${reference}</li>
-        </ul>
-        <p>Thank you for using VICKYDATA.</p>
-        `
-      );
+      try {
+        sendMail(
+          user.email,
+          'Data Purchase Successful - VICKYDATA',
+          `
+          <h2>Data Purchase Successful</h2>
+          <p>Hi ${user.full_name},</p>
+          <p>Your data purchase was successful. Details:</p>
+          <ul>
+            <li><strong>Plan:</strong> ${plan.plan_name}</li>
+            <li><strong>Network:</strong> ${plan.network}</li>
+            <li><strong>Phone:</strong> ${phone_number}</li>
+            <li><strong>Amount Deducted:</strong>
+              ${formatNaira(plan.selling_price)}</li>
+            <li><strong>New Balance:</strong>
+              ${formatNaira(newBalance)}</li>
+            <li><strong>Reference:</strong> ${reference}</li>
+          </ul>
+          <p>Thank you for using VICKYDATA.</p>
+          `
+        );
+      } catch (mailErr) {
+        console.error('Data purchase success email failed:', mailErr.message);
+      }
 
       return res.json({
         message: 'Data purchased successfully.',
@@ -430,14 +450,29 @@ exports.purchaseAirtime = async (req, res) => {
       status: 'pending'
     });
 
-    // Deduct wallet BEFORE calling PeaceSub
+    // Deduct wallet BEFORE calling PeaceSub using atomic updateUserBalance helper
+    let balanceResult;
+    try {
+      balanceResult = await updateUserBalance(req.user.id, -parseFloat(amount));
+    } catch (updateErr) {
+      await supabase
+        .from('transactions')
+        .update({ status: 'failed' })
+        .eq('reference', reference);
+
+      return res.status(400).json({
+        message: updateErr.message || 'Insufficient wallet balance.'
+      });
+    }
+
+    // Update transactions with balance_before and balance_after
     await supabase
-      .from('users')
+      .from('transactions')
       .update({
-        wallet_balance: parseFloat(user.wallet_balance) -
-          parseFloat(amount)
+        balance_before: balanceResult.balanceBefore,
+        balance_after: balanceResult.balanceAfter
       })
-      .eq('id', req.user.id);
+      .eq('reference', reference);
 
     // ── CALL PEACESUB AIRTIME API ───────────────────────
     console.log('Calling PeaceSub airtime API with:', {
@@ -483,28 +518,31 @@ exports.purchaseAirtime = async (req, res) => {
         })
         .eq('reference', reference);
 
-      const newBalance = parseFloat(user.wallet_balance) -
-        parseFloat(amount);
+      const newBalance = balanceResult.balanceAfter;
 
-      sendMail(
-        user.email,
-        'Airtime Purchase Successful - VICKYDATA',
-        `
-        <h2>Airtime Purchase Successful</h2>
-        <p>Hi ${user.full_name},</p>
-        <p>Your airtime purchase was successful. Details:</p>
-        <ul>
-          <li><strong>Network:</strong>
-            ${networkNames[provider_id] || network}</li>
-          <li><strong>Phone:</strong> ${phone_number}</li>
-          <li><strong>Amount:</strong> ${formatNaira(amount)}</li>
-          <li><strong>New Balance:</strong>
-            ${formatNaira(newBalance)}</li>
-          <li><strong>Reference:</strong> ${reference}</li>
-        </ul>
-        <p>Thank you for using VICKYDATA.</p>
-        `
-      );
+      try {
+        sendMail(
+          user.email,
+          'Airtime Purchase Successful - VICKYDATA',
+          `
+          <h2>Airtime Purchase Successful</h2>
+          <p>Hi ${user.full_name},</p>
+          <p>Your airtime purchase was successful. Details:</p>
+          <ul>
+            <li><strong>Network:</strong>
+              ${networkNames[provider_id] || network}</li>
+            <li><strong>Phone:</strong> ${phone_number}</li>
+            <li><strong>Amount:</strong> ${formatNaira(amount)}</li>
+            <li><strong>New Balance:</strong>
+              ${formatNaira(newBalance)}</li>
+            <li><strong>Reference:</strong> ${reference}</li>
+          </ul>
+          <p>Thank you for using VICKYDATA.</p>
+          `
+        );
+      } catch (mailErr) {
+        console.error('Airtime purchase success email failed:', mailErr.message);
+      }
 
       return res.json({
         message: 'Airtime sent successfully.',

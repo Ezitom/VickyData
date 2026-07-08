@@ -48,7 +48,10 @@ const updateUserBalance = async (userId, amount) => {
     }
 
     if (updatedRows && updatedRows.length > 0) {
-      return parseFloat(updatedRows[0].wallet_balance);
+      return {
+        balanceBefore: currentBalance,
+        balanceAfter: parseFloat(updatedRows[0].wallet_balance)
+      };
     } else {
       retries--;
       await new Promise(resolve => setTimeout(resolve, 50 + Math.random() * 100));
@@ -153,9 +156,9 @@ const creditWallet = async (reference) => {
     }
 
     const fundingAmount = parseFloat(funding.amount);
-    let newBalance;
+    let balanceResult;
     try {
-      newBalance = await updateUserBalance(funding.user_id, fundingAmount);
+      balanceResult = await updateUserBalance(funding.user_id, fundingAmount);
     } catch (updateErr) {
       console.error('Wallet update error:', updateErr);
       return { 
@@ -164,11 +167,17 @@ const creditWallet = async (reference) => {
       };
     }
 
+    const newBalance = balanceResult.balanceAfter;
+
     // Mark wallet_funding as successful AFTER 
     // wallet is credited
     await supabase
       .from('wallet_funding')
-      .update({ status: 'successful' })
+      .update({
+        status: 'successful',
+        balance_before: balanceResult.balanceBefore,
+        balance_after: balanceResult.balanceAfter
+      })
       .eq('id', funding.id);
 
     // Insert transaction record
@@ -182,66 +191,72 @@ const creditWallet = async (reference) => {
       amount: fundingAmount,
       reference: txRef,
       paystack_reference: reference,
-      status: 'successful'
+      status: 'successful',
+      balance_before: balanceResult.balanceBefore,
+      balance_after: balanceResult.balanceAfter
     });
 
     // Send email to user (non-blocking)
-    sendMail(
-      user.email,
-      'Wallet Funded Successfully - VICKYDATA',
-      `
-      <div style="font-family:Arial,sans-serif;
-                  max-width:600px;margin:0 auto;">
-        <div style="background:#0D0D0D;padding:24px;
-                    text-align:center;
-                    border-radius:12px 12px 0 0;">
-          <h1 style="color:#00C6AE;margin:0;
-                     letter-spacing:2px;">
-            VICKY<span style="color:#fff;">DATA</span>
-          </h1>
-        </div>
-        <div style="background:#fff;padding:32px;
-                    border-radius:0 0 12px 12px;
-                    border:1px solid #eee;">
-          <h2 style="color:#111;margin-top:0;">
-            Wallet Funded Successfully!
-          </h2>
-          <p style="color:#555;">
-            Hi ${user.full_name.split(' ')[0]},
-          </p>
-          <p style="color:#555;">
-            Your VICKYDATA wallet has been credited.
-          </p>
-          <div style="background:#f5f5f5;
-                      border-radius:8px;
-                      padding:20px;margin:16px 0;">
-            <p style="margin:0 0 8px;color:#666;">
-              Amount Funded
-            </p>
-            <p style="margin:0;font-size:1.5rem;
-                      font-weight:700;color:#00C6AE;">
-              ${formatAmount(fundingAmount)}
-            </p>
+    try {
+      sendMail(
+        user.email,
+        'Wallet Funded Successfully - VICKYDATA',
+        `
+        <div style="font-family:Arial,sans-serif;
+                    max-width:600px;margin:0 auto;">
+          <div style="background:#0D0D0D;padding:24px;
+                      text-align:center;
+                      border-radius:12px 12px 0 0;">
+            <h1 style="color:#00C6AE;margin:0;
+                       letter-spacing:2px;">
+              VICKY<span style="color:#fff;">DATA</span>
+            </h1>
           </div>
-          <p style="color:#555;">
-            <strong>New Balance:</strong> 
-            ${formatAmount(newBalance)}
-          </p>
-          <p style="color:#555;">
-            <strong>Reference:</strong> ${reference}
-          </p>
-          <a href="${process.env.FRONTEND_URL}/user/dashboard.html"
-             style="display:block;background:#00C6AE;
-                    color:#0D0D0D;text-decoration:none;
-                    padding:14px 24px;border-radius:8px;
-                    text-align:center;font-weight:700;
-                    margin-top:24px;">
-            Go to Dashboard
-          </a>
+          <div style="background:#fff;padding:32px;
+                      border-radius:0 0 12px 12px;
+                      border:1px solid #eee;">
+            <h2 style="color:#111;margin-top:0;">
+              Wallet Funded Successfully!
+            </h2>
+            <p style="color:#555;">
+              Hi ${user.full_name.split(' ')[0]},
+            </p>
+            <p style="color:#555;">
+              Your VICKYDATA wallet has been credited.
+            </p>
+            <div style="background:#f5f5f5;
+                        border-radius:8px;
+                        padding:20px;margin:16px 0;">
+              <p style="margin:0 0 8px;color:#666;">
+                Amount Funded
+              </p>
+              <p style="margin:0;font-size:1.5rem;
+                        font-weight:700;color:#00C6AE;">
+                ${formatAmount(fundingAmount)}
+              </p>
+            </div>
+            <p style="color:#555;">
+              <strong>New Balance:</strong> 
+              ${formatAmount(newBalance)}
+            </p>
+            <p style="color:#555;">
+              <strong>Reference:</strong> ${reference}
+            </p>
+            <a href="${process.env.FRONTEND_URL}/user/dashboard.html"
+               style="display:block;background:#00C6AE;
+                      color:#0D0D0D;text-decoration:none;
+                      padding:14px 24px;border-radius:8px;
+                      text-align:center;font-weight:700;
+                      margin-top:24px;">
+              Go to Dashboard
+            </a>
+          </div>
         </div>
-      </div>
-      `
-    );
+        `
+      );
+    } catch (mailErr) {
+      console.error('Wallet funded email failed:', mailErr.message);
+    }
 
     return { 
       success: true, 
@@ -376,6 +391,11 @@ const verifyFunding = async (req, res) => {
     const { status } = paystackRes.data.data;
 
     if (status !== 'success') {
+      await supabase
+        .from('wallet_funding')
+        .update({ status: 'failed' })
+        .eq('paystack_reference', reference);
+
       return res.status(400).json({ 
         message: 'Payment not successful on Paystack.' 
       });
@@ -403,68 +423,72 @@ const verifyFunding = async (req, res) => {
       .single();
 
     if (user) {
-      sendMail(
-        process.env.MAIL_USER,
-        'VICKYDATA - New Wallet Funding Alert',
-        `
-        <div style="font-family:Arial,sans-serif;
-                    max-width:600px;margin:0 auto;">
-          <h2 style="color:#00C6AE;">
-            New Wallet Funding Alert
-          </h2>
-          <p>A user has funded their wallet.</p>
-          <table style="width:100%;
-                        border-collapse:collapse;">
-            <tr style="border-bottom:1px solid #eee;">
-              <td style="padding:10px;color:#666;
-                         font-weight:600;">
-                User
-              </td>
-              <td style="padding:10px;">
-                ${user.full_name}
-              </td>
-            </tr>
-            <tr style="border-bottom:1px solid #eee;">
-              <td style="padding:10px;color:#666;
-                         font-weight:600;">
-                Email
-              </td>
-              <td style="padding:10px;">
-                ${user.email}
-              </td>
-            </tr>
-            <tr style="border-bottom:1px solid #eee;">
-              <td style="padding:10px;color:#666;
-                         font-weight:600;">
-                Amount
-              </td>
-              <td style="padding:10px;color:#00C6AE;
-                         font-weight:700;">
-                ${formatAmount(result.amount)}
-              </td>
-            </tr>
-            <tr style="border-bottom:1px solid #eee;">
-              <td style="padding:10px;color:#666;
-                         font-weight:600;">
-                New Balance
-              </td>
-              <td style="padding:10px;">
-                ${formatAmount(result.newBalance)}
-              </td>
-            </tr>
-            <tr>
-              <td style="padding:10px;color:#666;
-                         font-weight:600;">
-                Reference
-              </td>
-              <td style="padding:10px;">
-                ${reference}
-              </td>
-            </tr>
-          </table>
-        </div>
-        `
-      );
+      try {
+        sendMail(
+          process.env.MAIL_USER,
+          'VICKYDATA - New Wallet Funding Alert',
+          `
+          <div style="font-family:Arial,sans-serif;
+                      max-width:600px;margin:0 auto;">
+            <h2 style="color:#00C6AE;">
+              New Wallet Funding Alert
+            </h2>
+            <p>A user has funded their wallet.</p>
+            <table style="width:100%;
+                          border-collapse:collapse;">
+              <tr style="border-bottom:1px solid #eee;">
+                <td style="padding:10px;color:#666;
+                           font-weight:600;">
+                  User
+                </td>
+                <td style="padding:10px;">
+                  ${user.full_name}
+                </td>
+              </tr>
+              <tr style="border-bottom:1px solid #eee;">
+                <td style="padding:10px;color:#666;
+                           font-weight:600;">
+                  Email
+                </td>
+                <td style="padding:10px;">
+                  ${user.email}
+                </td>
+              </tr>
+              <tr style="border-bottom:1px solid #eee;">
+                <td style="padding:10px;color:#666;
+                           font-weight:600;">
+                  Amount
+                </td>
+                <td style="padding:10px;color:#00C6AE;
+                           font-weight:700;">
+                  ${formatAmount(result.amount)}
+                </td>
+              </tr>
+              <tr style="border-bottom:1px solid #eee;">
+                <td style="padding:10px;color:#666;
+                           font-weight:600;">
+                  New Balance
+                </td>
+                <td style="padding:10px;">
+                  ${formatAmount(result.newBalance)}
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:10px;color:#666;
+                           font-weight:600;">
+                  Reference
+                </td>
+                <td style="padding:10px;">
+                  ${reference}
+                </td>
+              </tr>
+            </table>
+          </div>
+          `
+        );
+      } catch (mailErr) {
+        console.error('Wallet funding alert email failed:', mailErr.message);
+      }
     }
 
     return res.status(200).json({
@@ -474,6 +498,16 @@ const verifyFunding = async (req, res) => {
 
   } catch (error) {
     console.error('Verify funding error:', error);
+    if (req.body.reference) {
+      try {
+        await supabase
+          .from('wallet_funding')
+          .update({ status: 'failed' })
+          .eq('paystack_reference', req.body.reference);
+      } catch (err) {
+        console.error('Failed to update abandoned status to failed:', err.message);
+      }
+    }
     return res.status(500).json({ 
       message: 'Something went wrong. Please try again.' 
     });
@@ -545,5 +579,6 @@ module.exports = {
   initiateFunding,
   verifyFunding,
   paystackWebhook,
-  getBalance
+  getBalance,
+  updateUserBalance
 };

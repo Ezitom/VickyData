@@ -95,97 +95,101 @@ const register = async (req, res) => {
     const token = generateToken(newUser);
 
     // Send welcome email (non-blocking — do not await so SMTP issues don't affect registration)
-    sendMail(
-      email,
-      'Welcome to VICKYDATA!',
-      `
-      <div style="font-family: Arial, sans-serif; 
-                  max-width: 600px; margin: 0 auto;">
-        
-        <div style="background-color: #0D0D0D; 
-                    padding: 32px; 
-                    text-align: center;
-                    border-radius: 12px 12px 0 0;">
-          <h1 style="color: #00C6AE; 
-                     margin: 0; 
-                     font-size: 2rem;
-                     letter-spacing: 2px;">
-            VICKY<span style="color: white;">DATA</span>
-          </h1>
-        </div>
-
-        <div style="background-color: #ffffff; 
-                    padding: 32px;
-                    border-radius: 0 0 12px 12px;
-                    border: 1px solid #eee;">
+    try {
+      sendMail(
+        email,
+        'Welcome to VICKYDATA!',
+        `
+        <div style="font-family: Arial, sans-serif; 
+                    max-width: 600px; margin: 0 auto;">
           
-          <h2 style="color: #111; margin-top: 0;">
-            Welcome to VICKYDATA, 
-            ${full_name.split(' ')[0]}! 🎉
-          </h2>
-          
-          <p style="color: #555; line-height: 1.6;">
-            Your account has been created successfully. 
-            You can now buy affordable data and airtime 
-            for all Nigerian networks instantly.
-          </p>
-
-          <div style="background: #f5f5f5; 
-                      border-radius: 8px; 
-                      padding: 20px; 
-                      margin: 24px 0;">
-            <h3 style="margin-top:0; color:#111;">
-              What you can do on VICKYDATA:
-            </h3>
-            <ul style="color: #555; 
-                       line-height: 2; 
-                       padding-left: 20px;">
-              <li>Buy data for MTN, Airtel, Glo and 9mobile</li>
-              <li>Send airtime to any Nigerian number</li>
-              <li>Fund your wallet once and buy anytime</li>
-              <li>Track all your transactions in one place</li>
-            </ul>
+          <div style="background-color: #0D0D0D; 
+                      padding: 32px; 
+                      text-align: center;
+                      border-radius: 12px 12px 0 0;">
+            <h1 style="color: #00C6AE; 
+                       margin: 0; 
+                       font-size: 2rem;
+                       letter-spacing: 2px;">
+              VICKY<span style="color: white;">DATA</span>
+            </h1>
           </div>
 
-          <a href="https://vickydata.netlify.app/login.html"
-             style="display: block;
-                    background-color: #00C6AE;
-                    color: #0D0D0D;
-                    text-decoration: none;
-                    padding: 14px 24px;
-                    border-radius: 8px;
-                    text-align: center;
-                    font-weight: 700;
-                    font-size: 1rem;
-                    margin: 24px 0;">
-            Login to Your Account
-          </a>
+          <div style="background-color: #ffffff; 
+                      padding: 32px;
+                      border-radius: 0 0 12px 12px;
+                      border: 1px solid #eee;">
+            
+            <h2 style="color: #111; margin-top: 0;">
+              Welcome to VICKYDATA, 
+              ${full_name.split(' ')[0]}! 🎉
+            </h2>
+            
+            <p style="color: #555; line-height: 1.6;">
+              Your account has been created successfully. 
+              You can now buy affordable data and airtime 
+              for all Nigerian networks instantly.
+            </p>
 
-          <p style="color: #555; line-height: 1.6;">
-            If you have any questions or need help, 
-            chat with us directly on WhatsApp:
-            <a href="https://wa.me/2348143905306" 
-               style="color: #00C6AE; 
-                      font-weight: 600;">
-              Click here to chat
+            <div style="background: #f5f5f5; 
+                        border-radius: 8px; 
+                        padding: 20px; 
+                        margin: 24px 0;">
+              <h3 style="margin-top:0; color:#111;">
+                What you can do on VICKYDATA:
+              </h3>
+              <ul style="color: #555; 
+                         line-height: 2; 
+                         padding-left: 20px;">
+                <li>Buy data for MTN, Airtel, Glo and 9mobile</li>
+                <li>Send airtime to any Nigerian number</li>
+                <li>Fund your wallet once and buy anytime</li>
+                <li>Track all your transactions in one place</li>
+              </ul>
+            </div>
+
+            <a href="https://vickydata.netlify.app/login.html"
+               style="display: block;
+                      background-color: #00C6AE;
+                      color: #0D0D0D;
+                      text-decoration: none;
+                      padding: 14px 24px;
+                      border-radius: 8px;
+                      text-align: center;
+                      font-weight: 700;
+                      font-size: 1rem;
+                      margin: 24px 0;">
+              Login to Your Account
             </a>
-          </p>
 
-          <hr style="border: none; 
-                     border-top: 1px solid #eee; 
-                     margin: 24px 0;">
-          
-          <p style="color: #999; 
-                    font-size: 0.8rem; 
-                    text-align: center;">
-            This email was sent because you created an 
-            account on VICKYDATA. If you did not create 
-            this account please ignore this email.
-          </p>
+            <p style="color: #555; line-height: 1.6;">
+              If you have any questions or need help, 
+              chat with us directly on WhatsApp:
+              <a href="https://wa.me/2348143905306" 
+                 style="color: #00C6AE; 
+                        font-weight: 600;">
+                Click here to chat
+              </a>
+            </p>
+
+            <hr style="border: none; 
+                       border-top: 1px solid #eee; 
+                       margin: 24px 0;">
+            
+            <p style="color: #999; 
+                      font-size: 0.8rem; 
+                      text-align: center;">
+              This email was sent because you created an 
+              account on VICKYDATA. If you did not create 
+              this account please ignore this email.
+            </p>
+          </div>
         </div>
-      </div>
-      `
-    );
+        `
+      );
+    } catch (mailErr) {
+      console.error('Welcome email failed:', mailErr.message);
+    }
 
     return res.status(201).json({
       message: 'Account created successfully.',
@@ -454,7 +458,11 @@ const forgotPassword = async (req, res) => {
         </html>
       `;
 
-      sendMail(user.email, 'VICKYDATA - Password Reset OTP', resetHtml);
+      try {
+        sendMail(user.email, 'VICKYDATA - Password Reset OTP', resetHtml);
+      } catch (mailErr) {
+        console.error('Password reset OTP email failed:', mailErr.message);
+      }
     }
 
     // Always return success to prevent email enumeration

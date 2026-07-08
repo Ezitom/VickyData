@@ -43,10 +43,12 @@ CREATE TABLE transactions (
   amount DECIMAL(10,2) NOT NULL,
   plan_id INTEGER REFERENCES data_plans(id) ON DELETE SET NULL,
   status VARCHAR(20) DEFAULT 'pending'
-    CHECK (status IN ('pending', 'successful', 'failed')),
+    CHECK (status IN ('pending', 'successful', 'failed', 'refunded')),
   reference VARCHAR(100) UNIQUE NOT NULL,
   provider_reference VARCHAR(100),
   paystack_reference VARCHAR(100),
+  balance_before DECIMAL(12,2),
+  balance_after DECIMAL(12,2),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -58,6 +60,8 @@ CREATE TABLE wallet_funding (
   paystack_reference VARCHAR(100) UNIQUE NOT NULL,
   status VARCHAR(20) DEFAULT 'pending'
     CHECK (status IN ('pending', 'successful', 'failed')),
+  balance_before DECIMAL(12,2),
+  balance_after DECIMAL(12,2),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
