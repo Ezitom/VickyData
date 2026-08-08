@@ -109,9 +109,11 @@ exports.purchaseData = async (req, res) => {
   let plan = null;
   let user = null;
   let balanceResult = null;
+  let phone_number = null;
 
   try {
-    const { plan_id, phone_number } = req.body;
+    const { plan_id } = req.body;
+    phone_number = req.body?.phone_number;
 
     // Validate inputs
     if (!plan_id || !phone_number) {
@@ -417,9 +419,13 @@ exports.purchaseAirtime = async (req, res) => {
   let reference = null;
   let user = null;
   let balanceResult = null;
+  let phone_number = null;
+  let amount = null;
 
   try {
-    const { network, phone_number, amount } = req.body;
+    const { network } = req.body;
+    phone_number = req.body?.phone_number;
+    amount = req.body?.amount;
 
     // Validate inputs
     if (!network || !phone_number || !amount) {
