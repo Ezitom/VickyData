@@ -323,35 +323,67 @@ exports.purchaseData = async (req, res) => {
     console.error('Data purchase error:', error.message);
     console.error('Error code:', error.code);
 
-    // Mark the transaction as failed (do NOT auto-refund)
-    // Admin will review and manually refund from the dashboard
-    try {
-      if (reference) {
+    let finalBalance = balanceResult ? balanceResult.balanceAfter : (user ? user.wallet_balance : 0);
+
+    if (reference && balanceResult && plan) {
+      const refundAmount = parseFloat(plan.selling_price);
+
+      // Perform automatic refund crediting wallet back
+      try {
+        const refundResult = await updateUserBalance(req.user.id, refundAmount);
+        finalBalance = refundResult.balanceAfter;
+      } catch (refundErr) {
+        console.error('Auto-refund failed for data purchase:', refundErr.message);
+      }
+
+      // Mark transaction as failed with updated final balance
+      try {
         await supabase
           .from('transactions')
-          .update({ status: 'failed' })
+          .update({
+            status: 'failed',
+            balance_after: finalBalance,
+            updated_at: new Date().toISOString()
+          })
           .eq('reference', reference);
+      } catch (markErr) {
+        console.error('Failed to mark transaction as failed:', markErr.message);
       }
-    } catch (markErr) {
-      console.error('Failed to mark transaction as failed:', markErr.message);
+
+      // Send refund email to user
+      if (user && user.email) {
+        try {
+          sendMail(
+            user.email,
+            'Data Purchase Failed (Refunded) - VICKYDATA',
+            `
+            <h2>Data Purchase Failed</h2>
+            <p>Hi ${user.full_name},</p>
+            <p>Your data purchase of <strong>${plan.plan_name}</strong> (${plan.network}) to <strong>${phone_number}</strong> could not be completed.</p>
+            <p><strong>Your wallet balance has been automatically refunded ${formatNaira(refundAmount)}.</strong></p>
+            <ul>
+              <li><strong>Reference:</strong> ${reference}</li>
+              <li><strong>Restored Balance:</strong> ${formatNaira(finalBalance)}</li>
+            </ul>
+            <p>Thank you for using VICKYDATA.</p>
+            `
+          );
+        } catch (mailErr) {
+          console.error('Data purchase failure email failed:', mailErr.message);
+        }
+      }
     }
 
-    if (error.code === 'ECONNABORTED' ||
-        error.message.includes('timeout')) {
-      console.warn('Data purchase timeout for reference:', reference);
-      return res.status(500).json({
-        message: 'Purchase timed out. ' +
-                 'Please contact support to request a refund ' +
-                 'if your wallet was deducted. ' +
-                 'Reference: ' + reference
-      });
-    }
+    const isTimeout = error.code === 'ECONNABORTED' || (error.message && error.message.includes('timeout'));
+    const refundNote = balanceResult && plan ? ` Your wallet has been automatically refunded ${formatNaira(plan.selling_price)}.` : '';
+    const failureMsg = isTimeout
+      ? `Purchase timed out.${refundNote} Reference: ${reference}`
+      : `Data purchase failed: ${error.message || 'Provider error'}.${refundNote} Reference: ${reference}`;
 
-    return res.status(500).json({
-      message: 'Data purchase failed. ' +
-               'Please contact support to request a refund ' +
-               'if your wallet was deducted. ' +
-               'Reference: ' + reference
+    return res.status(400).json({
+      message: failureMsg,
+      reference,
+      new_balance: finalBalance
     });
   }
 };
@@ -559,35 +591,67 @@ exports.purchaseAirtime = async (req, res) => {
     console.error('Airtime purchase error:', error.message);
     console.error('Error code:', error.code);
 
-    // Mark the transaction as failed (do NOT auto-refund)
-    // Admin will review and manually refund from the dashboard
-    try {
-      if (reference) {
+    let finalBalance = balanceResult ? balanceResult.balanceAfter : (user ? user.wallet_balance : 0);
+
+    if (reference && balanceResult && amount) {
+      const refundAmount = parseFloat(amount);
+
+      // Perform automatic refund crediting wallet back
+      try {
+        const refundResult = await updateUserBalance(req.user.id, refundAmount);
+        finalBalance = refundResult.balanceAfter;
+      } catch (refundErr) {
+        console.error('Auto-refund failed for airtime purchase:', refundErr.message);
+      }
+
+      // Mark transaction as failed with updated final balance
+      try {
         await supabase
           .from('transactions')
-          .update({ status: 'failed' })
+          .update({
+            status: 'failed',
+            balance_after: finalBalance,
+            updated_at: new Date().toISOString()
+          })
           .eq('reference', reference);
+      } catch (markErr) {
+        console.error('Failed to mark transaction as failed:', markErr.message);
       }
-    } catch (markErr) {
-      console.error('Failed to mark transaction as failed:', markErr.message);
+
+      // Send refund email to user
+      if (user && user.email) {
+        try {
+          sendMail(
+            user.email,
+            'Airtime Purchase Failed (Refunded) - VICKYDATA',
+            `
+            <h2>Airtime Purchase Failed</h2>
+            <p>Hi ${user.full_name},</p>
+            <p>Your airtime purchase of <strong>${formatNaira(refundAmount)}</strong> to <strong>${phone_number}</strong> could not be completed.</p>
+            <p><strong>Your wallet balance has been automatically refunded ${formatNaira(refundAmount)}.</strong></p>
+            <ul>
+              <li><strong>Reference:</strong> ${reference}</li>
+              <li><strong>Restored Balance:</strong> ${formatNaira(finalBalance)}</li>
+            </ul>
+            <p>Thank you for using VICKYDATA.</p>
+            `
+          );
+        } catch (mailErr) {
+          console.error('Airtime purchase failure email failed:', mailErr.message);
+        }
+      }
     }
 
-    if (error.code === 'ECONNABORTED' ||
-        error.message.includes('timeout')) {
-      console.warn('Airtime purchase timeout for reference:', reference);
-      return res.status(500).json({
-        message: 'Purchase timed out. ' +
-                 'Please contact support to request a refund ' +
-                 'if your wallet was deducted. ' +
-                 'Reference: ' + reference
-      });
-    }
+    const isTimeout = error.code === 'ECONNABORTED' || (error.message && error.message.includes('timeout'));
+    const refundNote = balanceResult && amount ? ` Your wallet has been automatically refunded ${formatNaira(amount)}.` : '';
+    const failureMsg = isTimeout
+      ? `Purchase timed out.${refundNote} Reference: ${reference}`
+      : `Airtime purchase failed: ${error.message || 'Provider error'}.${refundNote} Reference: ${reference}`;
 
-    return res.status(500).json({
-      message: 'Airtime purchase failed. ' +
-               'Please contact support to request a refund ' +
-               'if your wallet was deducted. ' +
-               'Reference: ' + reference
+    return res.status(400).json({
+      message: failureMsg,
+      reference,
+      new_balance: finalBalance
     });
   }
 };
