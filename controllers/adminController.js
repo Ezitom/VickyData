@@ -552,9 +552,9 @@ const refundTransaction = async (req, res) => {
       return res.status(404).json({ message: 'Transaction not found.' });
     }
 
-    if (tx.status !== 'failed') {
+    if (tx.status !== 'failed' && tx.status !== 'pending') {
       return res.status(400).json({
-        message: `Cannot refund a transaction with status "${tx.status}". Only failed transactions can be refunded.`
+        message: `Cannot refund a transaction with status "${tx.status}". Only failed or pending transactions can be refunded.`
       });
     }
 
