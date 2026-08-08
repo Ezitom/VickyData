@@ -101,10 +101,12 @@ const sendAnnouncementEmails = async (messageText) => {
 
     // If using Brevo HTTP API (starts with xkeysib)
     if (process.env.MAIL_PASS && process.env.MAIL_PASS.startsWith('xkeysib')) {
-      const BATCH_SIZE = 90; // Brevo allows up to 99 in `to` array
+      const BATCH_SIZE = 100; // Batch into chunks of 100 messageVersions per API call
       for (let i = 0; i < recipientEmails.length; i += BATCH_SIZE) {
         const chunk = recipientEmails.slice(i, i + BATCH_SIZE);
-        const toArray = chunk.map(email => ({ email }));
+        const messageVersions = chunk.map(email => ({
+          to: [{ email }]
+        }));
 
         try {
           await axios.post('https://api.brevo.com/v3/smtp/email', {
@@ -112,9 +114,9 @@ const sendAnnouncementEmails = async (messageText) => {
               name: senderName,
               email: senderEmail
             },
-            to: toArray,
             subject,
-            htmlContent
+            htmlContent,
+            messageVersions
           }, {
             headers: {
               'accept': 'application/json',
@@ -122,7 +124,7 @@ const sendAnnouncementEmails = async (messageText) => {
               'content-type': 'application/json'
             }
           });
-          console.log(`Announcement email batch (${chunk.length} recipients) sent via Brevo API.`);
+          console.log(`Announcement individual email batch (${chunk.length} recipients) sent via Brevo API.`);
         } catch (batchError) {
           const errMsg = batchError.response && batchError.response.data
             ? JSON.stringify(batchError.response.data)
@@ -131,7 +133,7 @@ const sendAnnouncementEmails = async (messageText) => {
         }
       }
     } else {
-      // Fallback batch dispatch via sendMail
+      // Fallback batch dispatch via sendMail (individual recipient per call)
       const BATCH_SIZE = 10;
       for (let i = 0; i < recipientEmails.length; i += BATCH_SIZE) {
         const chunk = recipientEmails.slice(i, i + BATCH_SIZE);
