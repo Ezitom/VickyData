@@ -20,8 +20,16 @@ const {
   refundTransaction
 } = require('../controllers/adminController');
 
+const {
+  publishAnnouncement,
+  getAdminAnnouncement
+} = require('../controllers/announcementController');
+
 // Apply both middlewares to all admin routes
 router.use(authMiddleware, adminMiddleware);
+
+router.post('/announcement', publishAnnouncement);
+router.get('/announcement', getAdminAnnouncement);
 
 router.get('/overview', getOverview);
 router.get('/transactions', getAllTransactions);
