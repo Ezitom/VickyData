@@ -2,6 +2,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const supabase = require('../config/supabase');
 const { sendMail } = require('../config/mailer');
+const { getWalletFundingSuccessEmailHtml } = require('../utils/emailTemplates');
 
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
@@ -198,61 +199,16 @@ const creditWallet = async (reference) => {
 
     // Send email to user (non-blocking)
     try {
+      const emailHtml = getWalletFundingSuccessEmailHtml({
+        userName: user.full_name,
+        amount: fundingAmount,
+        newBalance: newBalance,
+        reference: reference
+      });
       sendMail(
         user.email,
         'Wallet Funded Successfully - VICKYDATA',
-        `
-        <div style="font-family:Arial,sans-serif;
-                    max-width:600px;margin:0 auto;">
-          <div style="background:#0D0D0D;padding:24px;
-                      text-align:center;
-                      border-radius:12px 12px 0 0;">
-            <h1 style="color:#00C6AE;margin:0;
-                       letter-spacing:2px;">
-              VICKY<span style="color:#fff;">DATA</span>
-            </h1>
-          </div>
-          <div style="background:#fff;padding:32px;
-                      border-radius:0 0 12px 12px;
-                      border:1px solid #eee;">
-            <h2 style="color:#111;margin-top:0;">
-              Wallet Funded Successfully!
-            </h2>
-            <p style="color:#555;">
-              Hi ${user.full_name.split(' ')[0]},
-            </p>
-            <p style="color:#555;">
-              Your VICKYDATA wallet has been credited.
-            </p>
-            <div style="background:#f5f5f5;
-                        border-radius:8px;
-                        padding:20px;margin:16px 0;">
-              <p style="margin:0 0 8px;color:#666;">
-                Amount Funded
-              </p>
-              <p style="margin:0;font-size:1.5rem;
-                        font-weight:700;color:#00C6AE;">
-                ${formatAmount(fundingAmount)}
-              </p>
-            </div>
-            <p style="color:#555;">
-              <strong>New Balance:</strong> 
-              ${formatAmount(newBalance)}
-            </p>
-            <p style="color:#555;">
-              <strong>Reference:</strong> ${reference}
-            </p>
-            <a href="${process.env.FRONTEND_URL}/user/dashboard.html"
-               style="display:block;background:#00C6AE;
-                      color:#0D0D0D;text-decoration:none;
-                      padding:14px 24px;border-radius:8px;
-                      text-align:center;font-weight:700;
-                      margin-top:24px;">
-              Go to Dashboard
-            </a>
-          </div>
-        </div>
-        `
+        emailHtml
       );
     } catch (mailErr) {
       console.error('Wallet funded email failed:', mailErr.message);

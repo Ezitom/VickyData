@@ -3,6 +3,13 @@ const peaceSub = require('../config/peacesub');
 const { sendMail } = require('../config/mailer');
 const { resolveProviderBundleId } = require('../utils/providerPlanResolver');
 const { updateUserBalance } = require('./walletController');
+const {
+  getDataPurchaseSuccessEmailHtml,
+  getDataPurchaseFailedEmailHtml,
+  getAirtimePurchaseSuccessEmailHtml,
+  getAirtimePurchaseFailedEmailHtml,
+  getAdminRefundNotificationEmailHtml
+} = require('../utils/emailTemplates');
 
 const generateRef = (prefix) => {
   const timestamp = Date.now();
@@ -286,25 +293,19 @@ exports.purchaseData = async (req, res) => {
       const newBalance = balanceResult.balanceAfter;
 
       try {
+        const emailHtml = getDataPurchaseSuccessEmailHtml({
+          userName: user.full_name,
+          planName: plan.plan_name,
+          network: plan.network,
+          phoneNumber: phone_number,
+          amount: plan.selling_price,
+          newBalance: newBalance,
+          reference: reference
+        });
         sendMail(
           user.email,
           'Data Purchase Successful - VICKYDATA',
-          `
-          <h2>Data Purchase Successful</h2>
-          <p>Hi ${user.full_name},</p>
-          <p>Your data purchase was successful. Details:</p>
-          <ul>
-            <li><strong>Plan:</strong> ${plan.plan_name}</li>
-            <li><strong>Network:</strong> ${plan.network}</li>
-            <li><strong>Phone:</strong> ${phone_number}</li>
-            <li><strong>Amount Deducted:</strong>
-              ${formatNaira(plan.selling_price)}</li>
-            <li><strong>New Balance:</strong>
-              ${formatNaira(newBalance)}</li>
-            <li><strong>Reference:</strong> ${reference}</li>
-          </ul>
-          <p>Thank you for using VICKYDATA.</p>
-          `
+          emailHtml
         );
       } catch (mailErr) {
         console.error('Data purchase success email failed:', mailErr.message);
@@ -354,20 +355,19 @@ exports.purchaseData = async (req, res) => {
       // Send refund email to user
       if (user && user.email) {
         try {
+          const userRefundHtml = getDataPurchaseFailedEmailHtml({
+            userName: user.full_name,
+            planName: plan.plan_name,
+            network: plan.network,
+            phoneNumber: phone_number,
+            amount: refundAmount,
+            restoredBalance: finalBalance,
+            reference: reference
+          });
           sendMail(
             user.email,
             'Data Purchase Failed (Refunded) - VICKYDATA',
-            `
-            <h2>Data Purchase Failed</h2>
-            <p>Hi ${user.full_name},</p>
-            <p>Your data purchase of <strong>${plan.plan_name}</strong> (${plan.network}) to <strong>${phone_number}</strong> could not be completed.</p>
-            <p><strong>Your wallet balance has been automatically refunded ${formatNaira(refundAmount)}.</strong></p>
-            <ul>
-              <li><strong>Reference:</strong> ${reference}</li>
-              <li><strong>Restored Balance:</strong> ${formatNaira(finalBalance)}</li>
-            </ul>
-            <p>Thank you for using VICKYDATA.</p>
-            `
+            userRefundHtml
           );
         } catch (mailErr) {
           console.error('Data purchase failure email failed:', mailErr.message);
@@ -377,23 +377,22 @@ exports.purchaseData = async (req, res) => {
       // Send refund email to admin
       const adminEmail = process.env.MAIL_USER || 'oniebenezer1@gmail.com';
       try {
+        const adminRefundHtml = getAdminRefundNotificationEmailHtml({
+          userName: user ? user.full_name : 'N/A',
+          userEmail: user ? user.email : 'N/A',
+          type: 'Data',
+          network: plan ? plan.network : '',
+          phoneNumber: phone_number,
+          reference: reference,
+          refundAmount: refundAmount,
+          previousBalance: balanceResult.balanceAfter,
+          presentBalance: finalBalance,
+          isManual: false
+        });
         sendMail(
           adminEmail,
           `[ADMIN ALERT] Automatic Refund Processed - ${reference}`,
-          `
-          <h2>Automatic Refund Processed</h2>
-          <p>A failed data purchase was automatically refunded for a user.</p>
-          <table cellpadding="6" border="1" style="border-collapse: collapse;">
-            <tr><td><strong>User Name:</strong></td><td>${user ? user.full_name : 'N/A'}</td></tr>
-            <tr><td><strong>User Email:</strong></td><td>${user ? user.email : 'N/A'}</td></tr>
-            <tr><td><strong>Transaction Type:</strong></td><td>Data (${plan ? plan.network : ''})</td></tr>
-            <tr><td><strong>Phone Number:</strong></td><td>${phone_number}</td></tr>
-            <tr><td><strong>Reference:</strong></td><td>${reference}</td></tr>
-            <tr><td><strong>Refund Amount:</strong></td><td>${formatNaira(refundAmount)}</td></tr>
-            <tr><td><strong>Previous Balance:</strong></td><td>${formatNaira(balanceResult.balanceAfter)}</td></tr>
-            <tr><td><strong>Present Balance:</strong></td><td>${formatNaira(finalBalance)}</td></tr>
-          </table>
-          `
+          adminRefundHtml
         );
       } catch (adminMailErr) {
         console.error('Admin refund notification email failed:', adminMailErr.message);
@@ -583,24 +582,18 @@ exports.purchaseAirtime = async (req, res) => {
       const newBalance = balanceResult.balanceAfter;
 
       try {
+        const emailHtml = getAirtimePurchaseSuccessEmailHtml({
+          userName: user.full_name,
+          network: networkNames[provider_id] || network,
+          phoneNumber: phone_number,
+          amount: amount,
+          newBalance: newBalance,
+          reference: reference
+        });
         sendMail(
           user.email,
           'Airtime Purchase Successful - VICKYDATA',
-          `
-          <h2>Airtime Purchase Successful</h2>
-          <p>Hi ${user.full_name},</p>
-          <p>Your airtime purchase was successful. Details:</p>
-          <ul>
-            <li><strong>Network:</strong>
-              ${networkNames[provider_id] || network}</li>
-            <li><strong>Phone:</strong> ${phone_number}</li>
-            <li><strong>Amount:</strong> ${formatNaira(amount)}</li>
-            <li><strong>New Balance:</strong>
-              ${formatNaira(newBalance)}</li>
-            <li><strong>Reference:</strong> ${reference}</li>
-          </ul>
-          <p>Thank you for using VICKYDATA.</p>
-          `
+          emailHtml
         );
       } catch (mailErr) {
         console.error('Airtime purchase success email failed:', mailErr.message);
@@ -650,20 +643,18 @@ exports.purchaseAirtime = async (req, res) => {
       // Send refund email to user
       if (user && user.email) {
         try {
+          const userRefundHtml = getAirtimePurchaseFailedEmailHtml({
+            userName: user.full_name,
+            network: networkNames[provider_id] || network,
+            phoneNumber: phone_number,
+            amount: refundAmount,
+            restoredBalance: finalBalance,
+            reference: reference
+          });
           sendMail(
             user.email,
             'Airtime Purchase Failed (Refunded) - VICKYDATA',
-            `
-            <h2>Airtime Purchase Failed</h2>
-            <p>Hi ${user.full_name},</p>
-            <p>Your airtime purchase of <strong>${formatNaira(refundAmount)}</strong> to <strong>${phone_number}</strong> could not be completed.</p>
-            <p><strong>Your wallet balance has been automatically refunded ${formatNaira(refundAmount)}.</strong></p>
-            <ul>
-              <li><strong>Reference:</strong> ${reference}</li>
-              <li><strong>Restored Balance:</strong> ${formatNaira(finalBalance)}</li>
-            </ul>
-            <p>Thank you for using VICKYDATA.</p>
-            `
+            userRefundHtml
           );
         } catch (mailErr) {
           console.error('Airtime purchase failure email failed:', mailErr.message);
@@ -673,23 +664,22 @@ exports.purchaseAirtime = async (req, res) => {
       // Send refund email to admin
       const adminEmail = process.env.MAIL_USER || 'oniebenezer1@gmail.com';
       try {
+        const adminRefundHtml = getAdminRefundNotificationEmailHtml({
+          userName: user ? user.full_name : 'N/A',
+          userEmail: user ? user.email : 'N/A',
+          type: 'Airtime',
+          network: networkNames[provider_id] || network,
+          phoneNumber: phone_number,
+          reference: reference,
+          refundAmount: refundAmount,
+          previousBalance: balanceResult.balanceAfter,
+          presentBalance: finalBalance,
+          isManual: false
+        });
         sendMail(
           adminEmail,
           `[ADMIN ALERT] Automatic Refund Processed - ${reference}`,
-          `
-          <h2>Automatic Refund Processed</h2>
-          <p>A failed airtime purchase was automatically refunded for a user.</p>
-          <table cellpadding="6" border="1" style="border-collapse: collapse;">
-            <tr><td><strong>User Name:</strong></td><td>${user ? user.full_name : 'N/A'}</td></tr>
-            <tr><td><strong>User Email:</strong></td><td>${user ? user.email : 'N/A'}</td></tr>
-            <tr><td><strong>Transaction Type:</strong></td><td>Airtime</td></tr>
-            <tr><td><strong>Phone Number:</strong></td><td>${phone_number}</td></tr>
-            <tr><td><strong>Reference:</strong></td><td>${reference}</td></tr>
-            <tr><td><strong>Refund Amount:</strong></td><td>${formatNaira(refundAmount)}</td></tr>
-            <tr><td><strong>Previous Balance:</strong></td><td>${formatNaira(balanceResult.balanceAfter)}</td></tr>
-            <tr><td><strong>Present Balance:</strong></td><td>${formatNaira(finalBalance)}</td></tr>
-          </table>
-          `
+          adminRefundHtml
         );
       } catch (adminMailErr) {
         console.error('Admin refund notification email failed:', adminMailErr.message);

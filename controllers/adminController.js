@@ -2,6 +2,7 @@ const supabase = require('../config/supabase');
 const peaceSub = require('../config/peacesub');
 const { sendMail } = require('../config/mailer');
 const { updateUserBalance } = require('./walletController');
+const { getUserRefundNotificationEmailHtml, getAdminRefundNotificationEmailHtml } = require('../utils/emailTemplates');
 
 
 // Helper: format currency
@@ -588,20 +589,16 @@ const refundTransaction = async (req, res) => {
 
     // Email the user
     try {
+      const userHtml = getUserRefundNotificationEmailHtml({
+        userName: user.full_name,
+        amount: refundAmount,
+        newBalance: newBalance,
+        reference: reference
+      });
       sendMail(
         user.email,
         'Wallet Refunded - VICKYDATA',
-        `
-        <h2>Wallet Refunded</h2>
-        <p>Hi ${user.full_name},</p>
-        <p>Your wallet has been refunded for a failed transaction.</p>
-        <table cellpadding="6">
-          <tr><td><strong>Reference:</strong></td><td>${reference}</td></tr>
-          <tr><td><strong>Amount Refunded:</strong></td><td>N${refundAmount.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</td></tr>
-          <tr><td><strong>New Balance:</strong></td><td>N${newBalance.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</td></tr>
-        </table>
-        <p>Thank you for using VICKYDATA. We apologize for the inconvenience.</p>
-        `
+        userHtml
       );
     } catch (mailErr) {
       console.error('Refund email failed:', mailErr.message);
@@ -610,21 +607,22 @@ const refundTransaction = async (req, res) => {
     // Email the admin
     const adminEmail = process.env.MAIL_USER || 'oniebenezer1@gmail.com';
     try {
+      const adminHtml = getAdminRefundNotificationEmailHtml({
+        userName: user.full_name,
+        userEmail: user.email,
+        type: tx.type || 'Transaction',
+        network: tx.network || '',
+        phoneNumber: tx.phone_number || '',
+        reference: reference,
+        refundAmount: refundAmount,
+        previousBalance: balanceResult.balanceBefore,
+        presentBalance: newBalance,
+        isManual: true
+      });
       sendMail(
         adminEmail,
         `[ADMIN ALERT] Manual Refund Processed - ${reference}`,
-        `
-        <h2>Manual Refund Processed</h2>
-        <p>An admin has successfully processed a refund for a user.</p>
-        <table cellpadding="6" border="1" style="border-collapse: collapse;">
-          <tr><td><strong>User Name:</strong></td><td>${user.full_name}</td></tr>
-          <tr><td><strong>User Email:</strong></td><td>${user.email}</td></tr>
-          <tr><td><strong>Reference:</strong></td><td>${reference}</td></tr>
-          <tr><td><strong>Amount Refunded:</strong></td><td>N${refundAmount.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</td></tr>
-          <tr><td><strong>Previous Balance:</strong></td><td>N${balanceResult.balanceBefore.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</td></tr>
-          <tr><td><strong>Present Balance:</strong></td><td>N${newBalance.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</td></tr>
-        </table>
-        `
+        adminHtml
       );
     } catch (adminMailErr) {
       console.error('Admin notification email failed:', adminMailErr.message);

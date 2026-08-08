@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const supabase = require('../config/supabase');
 const { sendMail } = require('../config/mailer');
+const { getWelcomeEmailHtml, getPasswordResetEmailHtml } = require('../utils/emailTemplates');
 
 // Helper: generate JWT token
 const generateToken = (user) => {
@@ -96,96 +97,11 @@ const register = async (req, res) => {
 
     // Send welcome email (non-blocking — do not await so SMTP issues don't affect registration)
     try {
+      const emailHtml = getWelcomeEmailHtml({ userName: full_name });
       sendMail(
         email,
         'Welcome to VICKYDATA!',
-        `
-        <div style="font-family: Arial, sans-serif; 
-                    max-width: 600px; margin: 0 auto;">
-          
-          <div style="background-color: #0D0D0D; 
-                      padding: 32px; 
-                      text-align: center;
-                      border-radius: 12px 12px 0 0;">
-            <h1 style="color: #00C6AE; 
-                       margin: 0; 
-                       font-size: 2rem;
-                       letter-spacing: 2px;">
-              VICKY<span style="color: white;">DATA</span>
-            </h1>
-          </div>
-
-          <div style="background-color: #ffffff; 
-                      padding: 32px;
-                      border-radius: 0 0 12px 12px;
-                      border: 1px solid #eee;">
-            
-            <h2 style="color: #111; margin-top: 0;">
-              Welcome to VICKYDATA, 
-              ${full_name.split(' ')[0]}! 🎉
-            </h2>
-            
-            <p style="color: #555; line-height: 1.6;">
-              Your account has been created successfully. 
-              You can now buy affordable data and airtime 
-              for all Nigerian networks instantly.
-            </p>
-
-            <div style="background: #f5f5f5; 
-                        border-radius: 8px; 
-                        padding: 20px; 
-                        margin: 24px 0;">
-              <h3 style="margin-top:0; color:#111;">
-                What you can do on VICKYDATA:
-              </h3>
-              <ul style="color: #555; 
-                         line-height: 2; 
-                         padding-left: 20px;">
-                <li>Buy data for MTN, Airtel, Glo and 9mobile</li>
-                <li>Send airtime to any Nigerian number</li>
-                <li>Fund your wallet once and buy anytime</li>
-                <li>Track all your transactions in one place</li>
-              </ul>
-            </div>
-
-            <a href="https://vickydata.netlify.app/login.html"
-               style="display: block;
-                      background-color: #00C6AE;
-                      color: #0D0D0D;
-                      text-decoration: none;
-                      padding: 14px 24px;
-                      border-radius: 8px;
-                      text-align: center;
-                      font-weight: 700;
-                      font-size: 1rem;
-                      margin: 24px 0;">
-              Login to Your Account
-            </a>
-
-            <p style="color: #555; line-height: 1.6;">
-              If you have any questions or need help, 
-              chat with us directly on WhatsApp:
-              <a href="https://wa.me/2348143905306" 
-                 style="color: #00C6AE; 
-                        font-weight: 600;">
-                Click here to chat
-              </a>
-            </p>
-
-            <hr style="border: none; 
-                       border-top: 1px solid #eee; 
-                       margin: 24px 0;">
-            
-            <p style="color: #999; 
-                      font-size: 0.8rem; 
-                      text-align: center;">
-              This email was sent because you created an 
-              account on VICKYDATA. If you did not create 
-              this account please ignore this email.
-            </p>
-          </div>
-        </div>
-        `
+        emailHtml
       );
     } catch (mailErr) {
       console.error('Welcome email failed:', mailErr.message);
@@ -420,45 +336,11 @@ const forgotPassword = async (req, res) => {
       }
 
       // Send reset email
-      const firstName = user.full_name.split(' ')[0];
-      const resetHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="UTF-8">
-            <style>
-              body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }
-              .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-              .header { background: linear-gradient(135deg, #00C6AE, #009E8E); padding: 30px; text-align: center; }
-              .header h1 { color: #fff; margin: 0; font-size: 28px; letter-spacing: 2px; }
-              .body { padding: 30px; }
-              .body h2 { color: #333; }
-              .body p { color: #555; line-height: 1.7; }
-              .otp-box { display: block; width: fit-content; margin: 24px auto; background: #f0fffe; border: 2px dashed #00C6AE; border-radius: 12px; padding: 16px 40px; text-align: center; }
-              .otp-code { font-size: 42px; font-weight: bold; color: #00C6AE; letter-spacing: 8px; font-family: monospace; }
-              .footer { background: #f9f9f9; padding: 20px; text-align: center; font-size: 12px; color: #999; }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <div class="header"><h1>VICKYDATA</h1></div>
-              <div class="body">
-                <h2>Password Reset Request</h2>
-                <p>Hi ${firstName},</p>
-                <p>We received a request to reset your VICKYDATA account password. Use the OTP code below to reset your password. This code expires in <strong>15 minutes</strong>.</p>
-                <div class="otp-box">
-                  <div class="otp-code">${token}</div>
-                </div>
-                <p>Enter this code on the password reset page along with your new password.</p>
-                <p>If you did not request a password reset, you can safely ignore this email — your password will not change.</p>
-              </div>
-              <div class="footer">&copy; ${new Date().getFullYear()} VICKYDATA. All rights reserved.</div>
-            </div>
-          </body>
-        </html>
-      `;
-
       try {
+        const resetHtml = getPasswordResetEmailHtml({
+          userName: user.full_name,
+          token: token
+        });
         sendMail(user.email, 'VICKYDATA - Password Reset OTP', resetHtml);
       } catch (mailErr) {
         console.error('Password reset OTP email failed:', mailErr.message);
