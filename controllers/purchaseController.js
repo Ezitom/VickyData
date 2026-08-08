@@ -108,6 +108,7 @@ exports.purchaseData = async (req, res) => {
   let reference = null;
   let plan = null;
   let user = null;
+  let balanceResult = null;
 
   try {
     const { plan_id, phone_number } = req.body;
@@ -189,7 +190,6 @@ exports.purchaseData = async (req, res) => {
     });
 
     // Deduct wallet BEFORE calling PeaceSub using atomic updateUserBalance helper
-    let balanceResult;
     try {
       balanceResult = await updateUserBalance(req.user.id, -parseFloat(plan.selling_price));
     } catch (updateErr) {
@@ -392,6 +392,7 @@ exports.purchaseData = async (req, res) => {
 exports.purchaseAirtime = async (req, res) => {
   let reference = null;
   let user = null;
+  let balanceResult = null;
 
   try {
     const { network, phone_number, amount } = req.body;
@@ -483,7 +484,6 @@ exports.purchaseAirtime = async (req, res) => {
     });
 
     // Deduct wallet BEFORE calling PeaceSub using atomic updateUserBalance helper
-    let balanceResult;
     try {
       balanceResult = await updateUserBalance(req.user.id, -parseFloat(amount));
     } catch (updateErr) {
