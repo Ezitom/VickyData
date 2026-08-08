@@ -582,8 +582,7 @@ const refundTransaction = async (req, res) => {
       .update({
         status: 'refunded',
         balance_before: balanceResult.balanceBefore,
-        balance_after: balanceResult.balanceAfter,
-        updated_at: new Date().toISOString()
+        balance_after: balanceResult.balanceAfter
       })
       .eq('reference', reference);
 
@@ -606,6 +605,29 @@ const refundTransaction = async (req, res) => {
       );
     } catch (mailErr) {
       console.error('Refund email failed:', mailErr.message);
+    }
+
+    // Email the admin
+    const adminEmail = process.env.MAIL_USER || 'oniebenezer1@gmail.com';
+    try {
+      sendMail(
+        adminEmail,
+        `[ADMIN ALERT] Manual Refund Processed - ${reference}`,
+        `
+        <h2>Manual Refund Processed</h2>
+        <p>An admin has successfully processed a refund for a user.</p>
+        <table cellpadding="6" border="1" style="border-collapse: collapse;">
+          <tr><td><strong>User Name:</strong></td><td>${user.full_name}</td></tr>
+          <tr><td><strong>User Email:</strong></td><td>${user.email}</td></tr>
+          <tr><td><strong>Reference:</strong></td><td>${reference}</td></tr>
+          <tr><td><strong>Amount Refunded:</strong></td><td>N${refundAmount.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</td></tr>
+          <tr><td><strong>Previous Balance:</strong></td><td>N${balanceResult.balanceBefore.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</td></tr>
+          <tr><td><strong>Present Balance:</strong></td><td>N${newBalance.toLocaleString('en-NG', { minimumFractionDigits: 2 })}</td></tr>
+        </table>
+        `
+      );
+    } catch (adminMailErr) {
+      console.error('Admin notification email failed:', adminMailErr.message);
     }
 
     console.log(

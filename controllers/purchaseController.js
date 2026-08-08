@@ -342,8 +342,7 @@ exports.purchaseData = async (req, res) => {
           .from('transactions')
           .update({
             status: 'failed',
-            balance_after: finalBalance,
-            updated_at: new Date().toISOString()
+            balance_after: finalBalance
           })
           .eq('reference', reference);
       } catch (markErr) {
@@ -371,6 +370,31 @@ exports.purchaseData = async (req, res) => {
         } catch (mailErr) {
           console.error('Data purchase failure email failed:', mailErr.message);
         }
+      }
+
+      // Send refund email to admin
+      const adminEmail = process.env.MAIL_USER || 'oniebenezer1@gmail.com';
+      try {
+        sendMail(
+          adminEmail,
+          `[ADMIN ALERT] Automatic Refund Processed - ${reference}`,
+          `
+          <h2>Automatic Refund Processed</h2>
+          <p>A failed data purchase was automatically refunded for a user.</p>
+          <table cellpadding="6" border="1" style="border-collapse: collapse;">
+            <tr><td><strong>User Name:</strong></td><td>${user ? user.full_name : 'N/A'}</td></tr>
+            <tr><td><strong>User Email:</strong></td><td>${user ? user.email : 'N/A'}</td></tr>
+            <tr><td><strong>Transaction Type:</strong></td><td>Data (${plan ? plan.network : ''})</td></tr>
+            <tr><td><strong>Phone Number:</strong></td><td>${phone_number}</td></tr>
+            <tr><td><strong>Reference:</strong></td><td>${reference}</td></tr>
+            <tr><td><strong>Refund Amount:</strong></td><td>${formatNaira(refundAmount)}</td></tr>
+            <tr><td><strong>Previous Balance:</strong></td><td>${formatNaira(balanceResult.balanceAfter)}</td></tr>
+            <tr><td><strong>Present Balance:</strong></td><td>${formatNaira(finalBalance)}</td></tr>
+          </table>
+          `
+        );
+      } catch (adminMailErr) {
+        console.error('Admin refund notification email failed:', adminMailErr.message);
       }
     }
 
@@ -610,8 +634,7 @@ exports.purchaseAirtime = async (req, res) => {
           .from('transactions')
           .update({
             status: 'failed',
-            balance_after: finalBalance,
-            updated_at: new Date().toISOString()
+            balance_after: finalBalance
           })
           .eq('reference', reference);
       } catch (markErr) {
@@ -639,6 +662,31 @@ exports.purchaseAirtime = async (req, res) => {
         } catch (mailErr) {
           console.error('Airtime purchase failure email failed:', mailErr.message);
         }
+      }
+
+      // Send refund email to admin
+      const adminEmail = process.env.MAIL_USER || 'oniebenezer1@gmail.com';
+      try {
+        sendMail(
+          adminEmail,
+          `[ADMIN ALERT] Automatic Refund Processed - ${reference}`,
+          `
+          <h2>Automatic Refund Processed</h2>
+          <p>A failed airtime purchase was automatically refunded for a user.</p>
+          <table cellpadding="6" border="1" style="border-collapse: collapse;">
+            <tr><td><strong>User Name:</strong></td><td>${user ? user.full_name : 'N/A'}</td></tr>
+            <tr><td><strong>User Email:</strong></td><td>${user ? user.email : 'N/A'}</td></tr>
+            <tr><td><strong>Transaction Type:</strong></td><td>Airtime</td></tr>
+            <tr><td><strong>Phone Number:</strong></td><td>${phone_number}</td></tr>
+            <tr><td><strong>Reference:</strong></td><td>${reference}</td></tr>
+            <tr><td><strong>Refund Amount:</strong></td><td>${formatNaira(refundAmount)}</td></tr>
+            <tr><td><strong>Previous Balance:</strong></td><td>${formatNaira(balanceResult.balanceAfter)}</td></tr>
+            <tr><td><strong>Present Balance:</strong></td><td>${formatNaira(finalBalance)}</td></tr>
+          </table>
+          `
+        );
+      } catch (adminMailErr) {
+        console.error('Admin refund notification email failed:', adminMailErr.message);
       }
     }
 
