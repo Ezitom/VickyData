@@ -5,8 +5,10 @@ const { resolveProviderBundleId } = require('../utils/providerPlanResolver');
 const { updateUserBalance } = require('./walletController');
 const {
   getDataPurchaseSuccessEmailHtml,
+  getDataPurchaseProcessingEmailHtml,
   getDataPurchaseFailedEmailHtml,
   getAirtimePurchaseSuccessEmailHtml,
+  getAirtimePurchaseProcessingEmailHtml,
   getAirtimePurchaseFailedEmailHtml,
   getAdminRefundNotificationEmailHtml
 } = require('../utils/emailTemplates');
@@ -317,6 +319,46 @@ exports.purchaseData = async (req, res) => {
         new_balance: newBalance
       });
 
+    // PeaceSub 'processing' orders are resolved later via webhook/reconciliation — this only reflects PeaceSub's real-time status, no refund here.
+    } else if (psStatus === 'processing') {
+      await supabase
+        .from('transactions')
+        .update({
+          status: 'processing',
+          provider_reference: 
+            providerResponse.data.ident || 
+            String(providerResponse.data.id) || 
+            null
+        })
+        .eq('reference', reference);
+
+      const newBalance = balanceResult.balanceAfter;
+
+      try {
+        const emailHtml = getDataPurchaseProcessingEmailHtml({
+          userName: user.full_name,
+          planName: plan.plan_name,
+          network: plan.network,
+          phoneNumber: phone_number,
+          amount: plan.selling_price,
+          newBalance: newBalance,
+          reference: reference
+        });
+        sendMail(
+          user.email,
+          'Data Purchase Processing - VICKYDATA',
+          emailHtml
+        );
+      } catch (mailErr) {
+        console.error('Data purchase processing email failed:', mailErr.message);
+      }
+
+      return res.json({
+        message: 'Your order is being processed by the provider.',
+        reference,
+        new_balance: newBalance
+      });
+
     } else {
       const providerMessage = getProviderErrorMessage(providerResponse.data);
       throw new Error(providerMessage);
@@ -601,6 +643,45 @@ exports.purchaseAirtime = async (req, res) => {
 
       return res.json({
         message: 'Airtime sent successfully.',
+        reference,
+        new_balance: newBalance
+      });
+
+    // PeaceSub 'processing' orders are resolved later via webhook/reconciliation — this only reflects PeaceSub's real-time status, no refund here.
+    } else if (psStatus === 'processing') {
+      await supabase
+        .from('transactions')
+        .update({
+          status: 'processing',
+          provider_reference: 
+            providerResponse.data.ident || 
+            String(providerResponse.data.id) || 
+            null
+        })
+        .eq('reference', reference);
+
+      const newBalance = balanceResult.balanceAfter;
+
+      try {
+        const emailHtml = getAirtimePurchaseProcessingEmailHtml({
+          userName: user.full_name,
+          network: networkNames[provider_id] || network,
+          phoneNumber: phone_number,
+          amount: amount,
+          newBalance: newBalance,
+          reference: reference
+        });
+        sendMail(
+          user.email,
+          'Airtime Purchase Processing - VICKYDATA',
+          emailHtml
+        );
+      } catch (mailErr) {
+        console.error('Airtime purchase processing email failed:', mailErr.message);
+      }
+
+      return res.json({
+        message: 'Your order is being processed by the provider.',
         reference,
         new_balance: newBalance
       });

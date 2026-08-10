@@ -12,6 +12,7 @@ const purchaseRoutes = require('./routes/purchaseRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const announcementRoutes = require('./routes/announcementRoutes');
+const webhookRoutes = require('./routes/webhookRoutes');
 const authMiddleware = require('./middleware/authMiddleware');
 
 const app = express();
@@ -69,7 +70,7 @@ app.get('/api/config', (req, res) => {
 // ─── Routes ──────────────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
 app.use('/api/wallet', walletRoutes);
-
+app.use('/api/webhooks', webhookRoutes);
 app.use('/api/purchase', purchaseRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/admin', adminRoutes);

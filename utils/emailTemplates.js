@@ -181,7 +181,33 @@ const getDataPurchaseSuccessEmailHtml = ({ userName, planName, network, phoneNum
   });
 };
 
-// 3. DATA PURCHASE FAILED (REFUNDED)
+// 3. DATA PURCHASE PROCESSING
+const getDataPurchaseProcessingEmailHtml = ({ userName, planName, network, phoneNumber, amount, newBalance, reference }) => {
+  const firstName = userName ? userName.split(' ')[0] : 'User';
+  const table = renderDetailsTable([
+    { label: 'Network', value: network || 'N/A' },
+    { label: 'Data Plan', value: planName || 'N/A' },
+    { label: 'Recipient Phone', value: phoneNumber || 'N/A', mono: true },
+    { label: 'Amount Paid', value: formatNaira(amount) },
+    { label: 'Reference Code', value: reference || 'N/A', mono: true },
+    { label: 'Wallet Balance', value: formatNaira(newBalance), highlight: true }
+  ]);
+
+  return getMasterEmailHtml({
+    title: 'Data Purchase Processing ⏳',
+    badgeText: 'PROCESSING',
+    badgeColor: '#F59E0B',
+    badgeBg: '#FEF3C7',
+    contentHtml: `
+      <p>Hi <strong>${firstName}</strong>,</p>
+      <p>Your data purchase request has been submitted and is currently being processed by the provider.</p>
+      ${table}
+      <p>Your order will be completed shortly. Thank you for choosing VICKYDATA!</p>
+    `
+  });
+};
+
+// 4. DATA PURCHASE FAILED (REFUNDED)
 const getDataPurchaseFailedEmailHtml = ({ userName, planName, network, phoneNumber, amount, restoredBalance, reference }) => {
   const firstName = userName ? userName.split(' ')[0] : 'User';
   const table = renderDetailsTable([
@@ -208,7 +234,7 @@ const getDataPurchaseFailedEmailHtml = ({ userName, planName, network, phoneNumb
   });
 };
 
-// 4. AIRTIME PURCHASE SUCCESSFUL
+// 5. AIRTIME PURCHASE SUCCESSFUL
 const getAirtimePurchaseSuccessEmailHtml = ({ userName, network, phoneNumber, amount, newBalance, reference }) => {
   const firstName = userName ? userName.split(' ')[0] : 'User';
   const table = renderDetailsTable([
@@ -229,6 +255,31 @@ const getAirtimePurchaseSuccessEmailHtml = ({ userName, network, phoneNumber, am
       <p>Your airtime request has been delivered successfully!</p>
       ${table}
       <p>Thank you for using VICKYDATA!</p>
+    `
+  });
+};
+
+// 6. AIRTIME PURCHASE PROCESSING
+const getAirtimePurchaseProcessingEmailHtml = ({ userName, network, phoneNumber, amount, newBalance, reference }) => {
+  const firstName = userName ? userName.split(' ')[0] : 'User';
+  const table = renderDetailsTable([
+    { label: 'Network', value: network || 'N/A' },
+    { label: 'Recipient Phone', value: phoneNumber || 'N/A', mono: true },
+    { label: 'Airtime Amount', value: formatNaira(amount) },
+    { label: 'Reference Code', value: reference || 'N/A', mono: true },
+    { label: 'Wallet Balance', value: formatNaira(newBalance), highlight: true }
+  ]);
+
+  return getMasterEmailHtml({
+    title: 'Airtime Purchase Processing ⏳',
+    badgeText: 'PROCESSING',
+    badgeColor: '#F59E0B',
+    badgeBg: '#FEF3C7',
+    contentHtml: `
+      <p>Hi <strong>${firstName}</strong>,</p>
+      <p>Your airtime request has been submitted and is currently being processed by the provider.</p>
+      ${table}
+      <p>Your order will be completed shortly. Thank you for using VICKYDATA!</p>
     `
   });
 };
@@ -463,8 +514,10 @@ module.exports = {
   getMasterEmailHtml,
   getAnnouncementEmailHtml,
   getDataPurchaseSuccessEmailHtml,
+  getDataPurchaseProcessingEmailHtml,
   getDataPurchaseFailedEmailHtml,
   getAirtimePurchaseSuccessEmailHtml,
+  getAirtimePurchaseProcessingEmailHtml,
   getAirtimePurchaseFailedEmailHtml,
   getWalletFundingSuccessEmailHtml,
   getAdminRefundNotificationEmailHtml,
