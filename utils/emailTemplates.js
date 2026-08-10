@@ -168,7 +168,7 @@ const getDataPurchaseSuccessEmailHtml = ({ userName, planName, network, phoneNum
   ]);
 
   return getMasterEmailHtml({
-    title: 'Data Purchase Completed 🎉',
+    title: 'Data Purchase Completed',
     badgeText: 'SUCCESSFUL',
     badgeColor: '#10B981',
     badgeBg: '#D1FAE5',
@@ -194,7 +194,7 @@ const getDataPurchaseProcessingEmailHtml = ({ userName, planName, network, phone
   ]);
 
   return getMasterEmailHtml({
-    title: 'Data Purchase Processing ⏳',
+    title: 'Data Purchase Processing',
     badgeText: 'PROCESSING',
     badgeColor: '#F59E0B',
     badgeBg: '#FEF3C7',
@@ -246,7 +246,7 @@ const getAirtimePurchaseSuccessEmailHtml = ({ userName, network, phoneNumber, am
   ]);
 
   return getMasterEmailHtml({
-    title: 'Airtime Sent Successfully 📱',
+    title: 'Airtime Sent Successfully',
     badgeText: 'SUCCESSFUL',
     badgeColor: '#10B981',
     badgeBg: '#D1FAE5',
@@ -271,7 +271,7 @@ const getAirtimePurchaseProcessingEmailHtml = ({ userName, network, phoneNumber,
   ]);
 
   return getMasterEmailHtml({
-    title: 'Airtime Purchase Processing ⏳',
+    title: 'Airtime Purchase Processing',
     badgeText: 'PROCESSING',
     badgeColor: '#F59E0B',
     badgeBg: '#FEF3C7',
@@ -320,7 +320,7 @@ const getWalletFundingSuccessEmailHtml = ({ userName, amount, newBalance, refere
   ]);
 
   return getMasterEmailHtml({
-    title: 'Wallet Funded Successfully 💳',
+    title: 'Wallet Funded Successfully',
     badgeText: 'WALLET CREDITED',
     badgeColor: '#10B981',
     badgeBg: '#D1FAE5',
@@ -387,7 +387,7 @@ const getWelcomeEmailHtml = ({ userName }) => {
   const firstName = userName ? userName.split(' ')[0] : 'User';
 
   return getMasterEmailHtml({
-    title: `Welcome to VICKYDATA, ${firstName}! 🎉`,
+    title: `Welcome to VICKYDATA, ${firstName}!`,
     badgeText: 'WELCOME',
     badgeColor: '#00C6AE',
     badgeBg: '#E6F9F6',
@@ -414,7 +414,7 @@ const getPasswordResetEmailHtml = ({ userName, token }) => {
   const firstName = userName ? userName.split(' ')[0] : 'User';
 
   return getMasterEmailHtml({
-    title: 'Password Reset Request 🔐',
+    title: 'Password Reset Request',
     badgeText: 'SECURITY CODE',
     badgeColor: '#6366F1',
     badgeBg: '#EEF2FF',
