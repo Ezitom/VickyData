@@ -8,7 +8,7 @@
  * IMPORTANT: This does NOT change how PeaceSub works. It simply
  * delegates to the same axios instance already used in production.
  */
-const BaseProvider = require('./BaseProvider');
+const BaseProvider = require('../BaseProvider');
 const axios = require('axios');
 
 class PeaceSubProvider extends BaseProvider {
