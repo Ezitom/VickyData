@@ -146,6 +146,13 @@ const VTUService = {
   },
 
   /**
+   * Get the primary active provider instance.
+   */
+  async getPrimaryProvider() {
+    return registry.getPrimaryProvider();
+  },
+
+  /**
    * Get the primary provider's wallet balance.
    */
   async getPrimaryBalance() {

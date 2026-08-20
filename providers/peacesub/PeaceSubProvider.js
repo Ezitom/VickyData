@@ -14,9 +14,15 @@ const axios = require('axios');
 class PeaceSubProvider extends BaseProvider {
   constructor(config) {
     super(config);
+
+    let baseUrl = process.env.PEACESUB_BASE_URL || config.api_base_url || 'https://peacesub.com/api';
+    if (baseUrl && !baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
+      baseUrl = 'https://' + baseUrl;
+    }
+
     // Create dedicated axios instance using env vars (same as config/peacesub.js)
     this._client = axios.create({
-      baseURL: config.api_base_url || process.env.PEACESUB_BASE_URL,
+      baseURL: baseUrl,
       timeout: 120000,
       headers: {
         'Content-Type': 'application/json',
