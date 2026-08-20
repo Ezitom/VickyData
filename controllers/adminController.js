@@ -179,11 +179,13 @@ const toggleUserStatus = async (req, res) => {
 };
 
 // GET /api/admin/plans
+// Returns all plans for all providers.
+// The admin dashboard frontend filters by primary provider via the dropdown.
 const getPlans = async (req, res) => {
   try {
     const { data: plans, error } = await supabase
       .from('data_plans')
-      .select('*')
+      .select('*, vtu_providers(id, name, slug)')
       .order('network')
       .order('selling_price');
 
@@ -202,10 +204,10 @@ const getPlans = async (req, res) => {
 // POST /api/admin/plans
 const createPlan = async (req, res) => {
   try {
-    const { network, plan_name, size, validity, bundle_id, cost_price, selling_price } = req.body;
+    const { network, plan_name, size, validity, bundle_id, cost_price, selling_price, provider_id, provider_network_code } = req.body;
 
-    if (!network || !plan_name || !size || !validity || !bundle_id || !cost_price || !selling_price) {
-      return res.status(400).json({ message: 'All fields are required: network, plan_name, size, validity, bundle_id, cost_price, selling_price.' });
+    if (!network || !plan_name || !size || !validity || !bundle_id || !cost_price || !selling_price || !provider_id) {
+      return res.status(400).json({ message: 'All required fields must be filled: network, plan_name, size, validity, bundle_id, cost_price, selling_price, provider_id.' });
     }
 
     const validNetworks = ['MTN', 'Airtel', 'Glo', '9mobile'];
@@ -213,10 +215,22 @@ const createPlan = async (req, res) => {
       return res.status(400).json({ message: 'Invalid network.' });
     }
 
+    const insertData = {
+      network,
+      plan_name,
+      size,
+      validity,
+      bundle_id,
+      cost_price,
+      selling_price,
+      provider_id,
+      provider_network_code: provider_network_code != null && provider_network_code !== '' ? parseInt(provider_network_code, 10) : null
+    };
+
     const { data: plan, error } = await supabase
       .from('data_plans')
-      .insert({ network, plan_name, size, validity, bundle_id, cost_price, selling_price })
-      .select()
+      .insert(insertData)
+      .select('*, vtu_providers(id, name, slug)')
       .single();
 
     if (error) {
@@ -235,7 +249,7 @@ const createPlan = async (req, res) => {
 const updatePlan = async (req, res) => {
   try {
     const { id } = req.params;
-    const { cost_price, selling_price, plan_name, size, validity, bundle_id } = req.body;
+    const { cost_price, selling_price, plan_name, size, validity, bundle_id, provider_id, provider_network_code } = req.body;
 
     const updateFields = {};
     if (cost_price !== undefined) updateFields.cost_price = cost_price;
@@ -244,6 +258,10 @@ const updatePlan = async (req, res) => {
     if (size !== undefined) updateFields.size = size;
     if (validity !== undefined) updateFields.validity = validity;
     if (bundle_id !== undefined) updateFields.bundle_id = bundle_id;
+    if (provider_id !== undefined) updateFields.provider_id = provider_id;
+    if (provider_network_code !== undefined) {
+      updateFields.provider_network_code = (provider_network_code != null && provider_network_code !== '') ? parseInt(provider_network_code, 10) : null;
+    }
 
     if (Object.keys(updateFields).length === 0) {
       return res.status(400).json({ message: 'No valid fields to update.' });
@@ -253,7 +271,7 @@ const updatePlan = async (req, res) => {
       .from('data_plans')
       .update(updateFields)
       .eq('id', id)
-      .select()
+      .select('*, vtu_providers(id, name, slug)')
       .single();
 
     if (error) {
@@ -415,6 +433,13 @@ const getProviderWalletBalance = async (req, res) => {
 // POST /api/admin/sync-plans
 const syncPlans = async (req, res) => {
   try {
+    const { data: peacesubProvider } = await supabase
+      .from('vtu_providers')
+      .select('id')
+      .eq('slug', 'peacesub')
+      .maybeSingle();
+
+    const providerId = peacesubProvider?.id;
 
     const response = await peaceSub.get('/dataplans/');
     // PeaceSub returns an array directly or nested under a key
@@ -427,11 +452,16 @@ const syncPlans = async (req, res) => {
 
     for (const psPlan of psPlans) {
       try {
-        const { data: existingPlan } = await supabase
+        let query = supabase
           .from('data_plans')
           .select('*')
-          .eq('bundle_id', psPlan.id)
-          .single();
+          .eq('bundle_id', psPlan.id);
+
+        if (providerId) {
+          query = query.eq('provider_id', providerId);
+        }
+
+        const { data: existingPlan } = await query.single();
 
         if (existingPlan) {
           const oldCostPrice = 

@@ -1,6 +1,6 @@
 const supabase = require('../config/supabase');
-const peaceSub = require('../config/peacesub');
 const { sendMail } = require('../config/mailer');
+const VTUService = require('../providers/VTUService');
 const { resolveProviderBundleId } = require('../utils/providerPlanResolver');
 const { updateUserBalance } = require('./walletController');
 const {
@@ -12,6 +12,9 @@ const {
   getAirtimePurchaseFailedEmailHtml,
   getAdminRefundNotificationEmailHtml
 } = require('../utils/emailTemplates');
+
+// Keep backward-compat peaceSub client for the plan resolver utility
+const peaceSub = require('../config/peacesub');
 
 const generateRef = (prefix) => {
   const timestamp = Date.now();
@@ -41,15 +44,30 @@ const getProviderErrorMessage = (responseData, defaultMsg = 'Provider returned f
   return responseData.message || responseData.error || responseData.detail || String(responseData.status || defaultMsg);
 };
 
-// ─── GET ALL PLANS ────────────────────────────────────────────
+// ─── GET ALL PLANS (user-facing: only shows primary provider's active plans) ─
 exports.getAllPlans = async (req, res) => {
   try {
-    const { data: plans, error } = await supabase
+    // Resolve the current primary active provider
+    const { data: primaryProvider } = await supabase
+      .from('vtu_providers')
+      .select('id')
+      .eq('is_primary', true)
+      .eq('status', 'active')
+      .order('priority', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    let query = supabase
       .from('data_plans')
       .select('*')
       .eq('is_active', true)
       .order('selling_price', { ascending: true });
 
+    if (primaryProvider) {
+      query = query.eq('provider_id', primaryProvider.id);
+    }
+
+    const { data: plans, error } = await query;
     if (error) throw error;
 
     const grouped = plans.reduce((acc, plan) => {
@@ -86,15 +104,30 @@ exports.getPlansByNetwork = async (req, res) => {
   }
 };
 
-// ─── GET LIVE PLANS FROM PEACESUB (via Supabase cache) ──────────
+// ─── GET LIVE PLANS (user-facing: only shows primary provider's active plans) ─
 exports.getLivePlans = async (req, res) => {
   try {
-    const { data: plans, error } = await supabase
+    // Resolve the current primary active provider
+    const { data: primaryProvider } = await supabase
+      .from('vtu_providers')
+      .select('id')
+      .eq('is_primary', true)
+      .eq('status', 'active')
+      .order('priority', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    let query = supabase
       .from('data_plans')
       .select('*')
       .eq('is_active', true)
       .order('selling_price', { ascending: true });
 
+    if (primaryProvider) {
+      query = query.eq('provider_id', primaryProvider.id);
+    }
+
+    const { data: plans, error } = await query;
     if (error) throw error;
 
     const grouped = plans.reduce((acc, plan) => {
@@ -223,17 +256,14 @@ exports.purchaseData = async (req, res) => {
       })
       .eq('reference', reference);
 
-    // ── CALL PEACESUB DATA API ──────────────────────────
+    // ── CALL VTU SERVICE (routes to active primary provider) ─────────────────
     let resolvedBundleId = plan.bundle_id;
 
     try {
-      const providerBundleId = await resolveProviderBundleId(plan, peaceSub);
+      const activeProvider = await VTUService.getPrimaryProvider();
+      const providerBundleId = await resolveProviderBundleId(plan, activeProvider);
       if (providerBundleId) {
         resolvedBundleId = providerBundleId;
-        await supabase
-          .from('data_plans')
-          .update({ bundle_id: providerBundleId })
-          .eq('id', plan.id);
       }
     } catch (bundleError) {
       console.warn('Bundle resolution warning:', bundleError.message);
@@ -251,44 +281,55 @@ exports.purchaseData = async (req, res) => {
     };
     const providerNetworkId = networkMap[String(plan.network).toLowerCase()] || plan.network_id;
 
-    console.log('Calling PeaceSub data API with:', {
-      network: providerNetworkId,
+    console.log('Calling VTU provider (primary) data API with:', {
+      network: plan.network,
       mobile_number: phone_number,
       plan: resolvedBundleId,
-      Ported_number: true
     });
 
-    const providerResponse = await peaceSub.post(
-      '/data/',
-      {
-        network: providerNetworkId,
-        mobile_number: phone_number,
-        plan: resolvedBundleId,
-        Ported_number: true
-      }
-    );
-    // ────────────────────────────────────────────────────────
+    const providerResult = await VTUService.purchaseData({
+      internal_ref: reference,
+      phone_number,
+      network: plan.network,
+      bundle_id: resolvedBundleId,
+      provider_network_code: plan.provider_network_code,
+      amount: plan.selling_price
+    });
+    // ────────────────────────────────────────────────────────────────────────
 
-    console.log('PeaceSub data response:', 
-      JSON.stringify(providerResponse.data));
+    console.log('VTU provider data response:', JSON.stringify({
+      status: providerResult.status,
+      provider_reference: providerResult.provider_reference,
+      provider_slug: providerResult.provider_slug
+    }));
 
-    const psStatus = String(
-      providerResponse.data.Status ||
-      providerResponse.data.status ||
-      ''
-    ).toLowerCase();
+    // Store provider info in provider_transactions table
+    try {
+      await supabase.from('vtu_provider_transactions').insert({
+        internal_transaction_ref: reference,
+        provider_slug: providerResult.provider_slug,
+        provider_reference: providerResult.provider_reference,
+        provider_status: providerResult.status,
+        internal_status: providerResult.status,
+        response_payload: providerResult.raw_response
+      });
+    } catch (logErr) {
+      console.warn('Provider transaction log error:', logErr.message);
+    }
 
-    if (psStatus === 'successful' ||
-        psStatus === 'success' ||
-        psStatus === 'true') {
+    // Update transactions table with provider info
+    await supabase
+      .from('transactions')
+      .update({ provider_slug: providerResult.provider_slug })
+      .eq('reference', reference);
+
+    if (providerResult.status === 'SUCCESS') {
       await supabase
         .from('transactions')
         .update({
           status: 'successful',
-          provider_reference: 
-            providerResponse.data.ident || 
-            String(providerResponse.data.id) || 
-            null
+          provider_reference:
+            providerResult.provider_reference || null
         })
         .eq('reference', reference);
 
@@ -319,16 +360,14 @@ exports.purchaseData = async (req, res) => {
         new_balance: newBalance
       });
 
-    // PeaceSub 'processing' orders are resolved later via webhook/reconciliation — this only reflects PeaceSub's real-time status, no refund here.
-    } else if (psStatus === 'processing') {
+    // 'processing' orders resolved later via webhook/reconciliation
+    } else if (providerResult.status === 'PROCESSING') {
       await supabase
         .from('transactions')
         .update({
           status: 'processing',
-          provider_reference: 
-            providerResponse.data.ident || 
-            String(providerResponse.data.id) || 
-            null
+          provider_reference:
+            providerResult.provider_reference || null
         })
         .eq('reference', reference);
 
@@ -360,7 +399,7 @@ exports.purchaseData = async (req, res) => {
       });
 
     } else {
-      const providerMessage = getProviderErrorMessage(providerResponse.data);
+      const providerMessage = providerResult.error_message || 'Provider returned failure status';
       throw new Error(providerMessage);
     }
 
@@ -554,7 +593,7 @@ exports.purchaseAirtime = async (req, res) => {
       status: 'pending'
     });
 
-    // Deduct wallet BEFORE calling PeaceSub using atomic updateUserBalance helper
+    // Deduct wallet BEFORE calling provider using atomic updateUserBalance helper
     try {
       balanceResult = await updateUserBalance(req.user.id, -parseFloat(amount));
     } catch (updateErr) {
@@ -577,47 +616,53 @@ exports.purchaseAirtime = async (req, res) => {
       })
       .eq('reference', reference);
 
-    // ── CALL PEACESUB AIRTIME API ───────────────────────
-    console.log('Calling PeaceSub airtime API with:', {
-      network: parseInt(provider_id),
+    // ── CALL VTU SERVICE (routes to active primary provider: PEACESUB) ──────
+    console.log('Calling VTU provider (primary) airtime API with:', {
+      network,
       mobile_number: phone_number,
-      amount: parseFloat(amount),
-      Ported_number: true,
-      airtime_type: 'VTU'
+      amount: parseFloat(amount)
     });
 
-    const providerResponse = await peaceSub.post(
-      '/topup/',
-      {
-        network: parseInt(provider_id),
-        mobile_number: phone_number,
-        amount: parseFloat(amount),
-        Ported_number: true,
-        airtime_type: 'VTU'
-      }
-    );
-    // ────────────────────────────────────────────────────────
+    const providerResult = await VTUService.purchaseAirtime({
+      internal_ref: reference,
+      phone_number,
+      network,
+      amount: parseFloat(amount)
+    });
+    // ────────────────────────────────────────────────────────────────────────
 
-    console.log('PeaceSub airtime response:', 
-      JSON.stringify(providerResponse.data));
+    console.log('VTU provider airtime response:', JSON.stringify({
+      status: providerResult.status,
+      provider_reference: providerResult.provider_reference,
+      provider_slug: providerResult.provider_slug
+    }));
 
-    const psStatus = String(
-      providerResponse.data.Status ||
-      providerResponse.data.status ||
-      ''
-    ).toLowerCase();
+    // Store provider info
+    try {
+      await supabase.from('vtu_provider_transactions').insert({
+        internal_transaction_ref: reference,
+        provider_slug: providerResult.provider_slug,
+        provider_reference: providerResult.provider_reference,
+        provider_status: providerResult.status,
+        internal_status: providerResult.status,
+        response_payload: providerResult.raw_response
+      });
+    } catch (logErr) {
+      console.warn('Provider transaction log error:', logErr.message);
+    }
 
-    if (psStatus === 'successful' ||
-        psStatus === 'success' ||
-        psStatus === 'true') {
+    await supabase
+      .from('transactions')
+      .update({ provider_slug: providerResult.provider_slug })
+      .eq('reference', reference);
+
+    if (providerResult.status === 'SUCCESS') {
       await supabase
         .from('transactions')
         .update({
           status: 'successful',
-          provider_reference: 
-            providerResponse.data.ident || 
-            String(providerResponse.data.id) || 
-            null
+          provider_reference:
+            providerResult.provider_reference || null
         })
         .eq('reference', reference);
 
@@ -647,16 +692,14 @@ exports.purchaseAirtime = async (req, res) => {
         new_balance: newBalance
       });
 
-    // PeaceSub 'processing' orders are resolved later via webhook/reconciliation — this only reflects PeaceSub's real-time status, no refund here.
-    } else if (psStatus === 'processing') {
+    // 'processing' orders resolved later via webhook/reconciliation
+    } else if (providerResult.status === 'PROCESSING') {
       await supabase
         .from('transactions')
         .update({
           status: 'processing',
-          provider_reference: 
-            providerResponse.data.ident || 
-            String(providerResponse.data.id) || 
-            null
+          provider_reference:
+            providerResult.provider_reference || null
         })
         .eq('reference', reference);
 
@@ -687,7 +730,7 @@ exports.purchaseAirtime = async (req, res) => {
       });
 
     } else {
-      const providerMessage = getProviderErrorMessage(providerResponse.data);
+      const providerMessage = providerResult.error_message || 'Provider returned failure status';
       throw new Error(providerMessage);
     }
 
