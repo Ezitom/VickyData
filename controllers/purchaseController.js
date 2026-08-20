@@ -88,16 +88,31 @@ exports.getPlansByNetwork = async (req, res) => {
   try {
     const { network } = req.params;
 
-    const { data: plans, error } = await supabase
+    // Resolve the current primary active provider
+    const { data: primaryProvider } = await supabase
+      .from('vtu_providers')
+      .select('id')
+      .eq('is_primary', true)
+      .eq('status', 'active')
+      .order('priority', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    let query = supabase
       .from('data_plans')
       .select('*')
       .eq('network', network)
       .eq('is_active', true)
       .order('selling_price', { ascending: true });
 
+    if (primaryProvider) {
+      query = query.eq('provider_id', primaryProvider.id);
+    }
+
+    const { data: plans, error } = await query;
     if (error) throw error;
 
-    res.json({ plans });
+    res.json({ plans: plans || [] });
   } catch (error) {
     console.error('Get plans by network error:', error);
     res.status(500).json({ message: 'Something went wrong.' });
