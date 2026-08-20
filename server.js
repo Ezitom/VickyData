@@ -13,6 +13,7 @@ const transactionRoutes = require('./routes/transactionRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const announcementRoutes = require('./routes/announcementRoutes');
 const webhookRoutes = require('./routes/webhookRoutes');
+const providerAdminRoutes = require('./routes/providerAdminRoutes');
 const authMiddleware = require('./middleware/authMiddleware');
 
 const app = express();
@@ -74,6 +75,7 @@ app.use('/api/webhooks', webhookRoutes);
 app.use('/api/purchase', purchaseRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin/providers', providerAdminRoutes);
 app.use('/api/announcement', announcementRoutes);
 
 // ─── 404 Handler ─────────────────────────────────────────────────────────────

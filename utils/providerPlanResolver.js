@@ -1,3 +1,5 @@
+const supabase = require('../config/supabase');
+
 const normalizeText = (value = '') => {
   return String(value)
     .toLowerCase()
@@ -60,29 +62,52 @@ const findProviderPlanMatch = (localPlan, providerPlans = []) => {
   return null;
 };
 
-const resolveProviderBundleId = async (localPlan, peaceSub) => {
+const resolveProviderBundleId = async (localPlan, providerInstance) => {
   if (!localPlan) return null;
 
-  const currentBundleId = localPlan.bundle_id;
-  if (currentBundleId && String(currentBundleId).trim() !== '' && !String(currentBundleId).toLowerCase().includes('placeholder')) {
-    return currentBundleId;
+  const providerSlug = providerInstance?.slug || 'peacesub';
+
+  // 1. Check database mappings first (explicit admin mapping override)
+  try {
+    const { data: mapping } = await supabase
+      .from('provider_plan_mappings')
+      .select('provider_plan_id')
+      .eq('data_plan_id', localPlan.id)
+      .eq('provider_slug', providerSlug)
+      .maybeSingle();
+
+    if (mapping?.provider_plan_id) {
+      return mapping.provider_plan_id;
+    }
+  } catch (err) {
+    console.warn('[PlanResolver] DB mapping check failed:', err.message);
   }
 
+  // 2. Automated matching via provider catalog
   try {
-    const response = await peaceSub.get('/dataplans/');
-    const providerPlans = Array.isArray(response?.data)
-      ? response.data
-      : (response?.data?.plans || response?.data?.data || []);
-    const match = findProviderPlanMatch(localPlan, providerPlans);
+    let providerPlans = [];
+    if (providerInstance && typeof providerInstance.getDataPlans === 'function') {
+      providerPlans = await providerInstance.getDataPlans();
+    } else if (providerInstance && typeof providerInstance.get === 'function') {
+      // Axios client fallback (legacy PeaceSub)
+      const response = await providerInstance.get('/dataplans/');
+      providerPlans = Array.isArray(response?.data)
+        ? response.data
+        : (response?.data?.plans || response?.data?.data || []);
+    }
 
-    if (match?.id || match?.bundle_id || match?.plan_id) {
-      return match.id || match.bundle_id || match.plan_id;
+    if (Array.isArray(providerPlans) && providerPlans.length > 0) {
+      const match = findProviderPlanMatch(localPlan, providerPlans);
+      if (match?.id || match?.bundle_id || match?.plan_id) {
+        return match.id || match.bundle_id || match.plan_id;
+      }
     }
   } catch (error) {
-    console.warn('Unable to resolve provider bundle id:', error.message);
+    console.warn('[PlanResolver] Auto-resolve provider bundle id error:', error.message);
   }
 
-  return currentBundleId || null;
+  // 3. Fallback to localPlan.bundle_id
+  return localPlan.bundle_id || null;
 };
 
 module.exports = {
