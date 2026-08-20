@@ -45,14 +45,21 @@ const listProviders = async (req, res) => {
       .select('*')
       .order('priority', { ascending: true });
 
-    if (error) {
-      return res.status(500).json({ message: 'Could not fetch providers from database.' });
+    if (error || !dbProviders || dbProviders.length === 0) {
+      if (error) console.warn('[listProviders] Supabase table query warning:', error.message);
+      const defaultList = [
+        { id: 1, slug: 'peacesub', name: 'PEACESUB', status: 'active', priority: 1, is_primary: true, environment: 'live', api_key_set: !!process.env.PEACESUB_API_KEY },
+        { id: 2, slug: 'rapidbills', name: 'RapidBills', status: 'inactive', priority: 2, is_primary: false, environment: 'live', api_key_set: !!process.env.RAPIDBILLS_API_KEY },
+        { id: 3, slug: 'billox', name: 'Billox', status: 'inactive', priority: 3, is_primary: false, environment: 'live', api_key_set: !!process.env.BILLOX_API_KEY },
+        { id: 4, slug: 'vtpass', name: 'VTpass', status: 'inactive', priority: 4, is_primary: false, environment: 'live', api_key_set: !!process.env.VTPASS_PUBLIC_KEY }
+      ];
+      return res.json({ providers: defaultList });
     }
 
     // Enrich with runtime info
-    const providers = (dbProviders || []).map(p => ({
+    const providers = dbProviders.map(p => ({
       ...p,
-      api_key_set: !!getEnvKey(p.slug) // boolean: is the API key set in env?
+      api_key_set: !!getEnvKey(p.slug)
     }));
 
     return res.json({ providers });
@@ -318,17 +325,25 @@ const getHealthSnapshot = async (req, res) => {
     } catch {}
 
     // Get transaction stats from DB
-    const { data: successCount } = await supabase
-      .from('vtu_provider_transactions')
-      .select('id', { count: 'exact', head: true })
-      .eq('provider_slug', slug)
-      .eq('internal_status', 'SUCCESS');
+    let successCount = 0;
+    let failCount = 0;
+    try {
+      const { count: sc } = await supabase
+        .from('vtu_provider_transactions')
+        .select('id', { count: 'exact', head: true })
+        .eq('provider_slug', slug)
+        .eq('internal_status', 'SUCCESS');
+      if (sc) successCount = sc;
 
-    const { data: failCount } = await supabase
-      .from('vtu_provider_transactions')
-      .select('id', { count: 'exact', head: true })
-      .eq('provider_slug', slug)
-      .eq('internal_status', 'FAILED');
+      const { count: fc } = await supabase
+        .from('vtu_provider_transactions')
+        .select('id', { count: 'exact', head: true })
+        .eq('provider_slug', slug)
+        .eq('internal_status', 'FAILED');
+      if (fc) failCount = fc;
+    } catch (e) {
+      console.warn('[getHealthSnapshot] Count query warning:', e.message);
+    }
 
     const { data: dbConfig } = await supabase
       .from('vtu_providers')
@@ -342,8 +357,8 @@ const getHealthSnapshot = async (req, res) => {
       balance: balanceResult,
       db_config: dbConfig || {},
       stats: {
-        success_count: successCount || 0,
-        fail_count: failCount || 0
+        success_count: successCount,
+        fail_count: failCount
       }
     });
   }
@@ -448,18 +463,26 @@ const reloadRegistry = async (req, res) => {
 
 // ─── Plan Mappings CRUD ───────────────────────────────────────────────────────
 const listPlanMappings = async (req, res) => {
-  const { provider_slug, data_plan_id } = req.query;
-  let query = supabase
-    .from('provider_plan_mappings')
-    .select('*, data_plans(network, plan_name, size, validity, selling_price)')
-    .order('data_plan_id');
+  try {
+    const { provider_slug, data_plan_id } = req.query;
+    let query = supabase
+      .from('provider_plan_mappings')
+      .select('*, data_plans(network, plan_name, size, validity, selling_price)')
+      .order('data_plan_id');
 
-  if (provider_slug) query = query.eq('provider_slug', provider_slug);
-  if (data_plan_id) query = query.eq('data_plan_id', data_plan_id);
+    if (provider_slug) query = query.eq('provider_slug', provider_slug);
+    if (data_plan_id) query = query.eq('data_plan_id', data_plan_id);
 
-  const { data, error } = await query;
-  if (error) return res.status(500).json({ message: 'Could not fetch plan mappings.' });
-  return res.json({ mappings: data || [] });
+    const { data, error } = await query;
+    if (error) {
+      console.warn('[listPlanMappings] Supabase warning:', error.message);
+      return res.json({ mappings: [] });
+    }
+    return res.json({ mappings: data || [] });
+  } catch (err) {
+    console.error('listPlanMappings error:', err);
+    return res.json({ mappings: [] });
+  }
 };
 
 const createPlanMapping = async (req, res) => {
